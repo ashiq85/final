@@ -1,0 +1,36 @@
+# Environment variables
+.env
+*.env
+serviceAccountKey.json
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/venv/
+backend/env/
+crewai_env/
+.venv/
+
+# Build and distribution
+dist/
+frontend/dist/
+build/
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-shm
+*.db-wal
+
+# OS files
+.DS_Store
+Thumbs.db

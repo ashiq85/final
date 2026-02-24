@@ -1,0 +1,335 @@
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import List, Optional, Any
+from app.db.base import get_db
+from app.db.models import Patient, User, UserRole, HealthMetric
+from app.schemas import PatientCreate, PatientUpdate, PatientResponse, UserCreate, HealthMetricCreate, HealthMetricResponse
+from app.api.routes.auth import get_current_user
+from app.core.security import get_password_hash
+import random
+import string
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/patients", tags=["Patients"])
+
+
+def generate_medical_id(db: Any) -> str:
+    """Generate a unique medical ID in the format AH-XXXXX"""
+    while True:
+        digits = ''.join(random.choices(string.digits, k=5))
+        medical_id = f"AH-{digits}"
+        # Firestore check
+        docs = db.collection("patients").where("medical_id", "==", medical_id).limit(1).stream()
+        if not any(docs):
+            return medical_id
+
+
+@router.get("/search", response_model=List[PatientResponse])
+async def search_patients(
+    query: Optional[str] = Query(None, description="Search by name, email, or ID"),
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Search patients by name, email, or ID (Admin/Doctor only)"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.DOCTOR]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to search patients"
+        )
+    
+    if not query:
+        return []
+    
+    # Firestore doesn't support complex OR/ILike queries well without a search index
+    # We'll do a simple match on medical_id first, then maybe full_name if possible
+    results = []
+    
+    # Search by medical_id (exact match for simplicity in this migration step)
+    docs = db.collection("patients").where("medical_id", "==", query).stream()
+    for doc in docs:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        results.append(PatientResponse(**data))
+    
+    # If no results, try matching name (exact match)
+    if not results:
+        user_docs = db.collection("users").where("full_name", "==", query).stream()
+        for u_doc in user_docs:
+            p_docs = db.collection("patients").where("user_id", "==", u_doc.id).stream()
+            for p_doc in p_docs:
+                data = p_doc.to_dict()
+                data['id'] = p_doc.id
+                results.append(PatientResponse(**data))
+
+    return results
+
+
+@router.get("/me", response_model=PatientResponse)
+async def get_my_patient_profile(
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get current user's patient profile"""
+    if current_user.role != UserRole.PATIENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only patients can access this endpoint"
+        )
+    
+    docs = db.collection("patients").where("user_id", "==", current_user.id).limit(1).stream()
+    patient_doc = None
+    for doc in docs:
+        patient_doc = doc
+        break
+        
+    if not patient_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Patient profile not found"
+        )
+    
+    data = patient_doc.to_dict()
+    data['id'] = patient_doc.id
+    return PatientResponse(**data)
+
+
+@router.post("/", response_model=PatientResponse, status_code=status.HTTP_201_CREATED)
+async def create_patient(
+    patient_data: PatientCreate,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new patient profile"""
+    # Check if patient profile already exists
+    docs = db.collection("patients").where("user_id", "==", patient_data.user_id).limit(1).stream()
+    if any(docs):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Patient profile already exists for this user"
+        )
+    
+    medical_id = generate_medical_id(db)
+    patient = Patient(
+        **patient_data.model_dump(),
+        medical_id=medical_id,
+        email=patient_data.email
+    )
+    
+    doc_ref = db.collection("patients").document()
+    doc_ref.set(patient.to_firestore())
+    patient.id = doc_ref.id
+    
+    return patient
+
+
+@router.get("/{patient_id}", response_model=PatientResponse)
+async def get_patient(
+    patient_id: str,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get patient by ID"""
+    doc_ref = db.collection("patients").document(patient_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Patient not found"
+        )
+    
+    data = doc.to_dict()
+    data['id'] = doc.id
+    return PatientResponse(**data)
+
+
+@router.put("/{patient_id}", response_model=PatientResponse)
+async def update_patient(
+    patient_id: str,
+    patient_data: PatientUpdate,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update patient information"""
+    doc_ref = db.collection("patients").document(patient_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Patient not found"
+        )
+    
+    update_data = patient_data.model_dump(exclude_unset=True)
+    if update_data:
+        doc_ref.update(update_data)
+    
+    final_doc = doc_ref.get()
+    data = final_doc.to_dict()
+    data['id'] = final_doc.id
+    return PatientResponse(**data)
+
+
+@router.get("/", response_model=List[PatientResponse])
+async def list_patients(
+    skip: int = 0,
+    limit: int = 100,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List all patients (admin/doctor only)"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.DOCTOR]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view all patients"
+        )
+    
+    # Firestore pagination (simplified for now with just limit)
+    docs = db.collection("patients").limit(limit).stream()
+    results = []
+    for doc in docs:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        results.append(PatientResponse(**data))
+    
+    return results
+
+
+@router.post("/register", response_model=PatientResponse, status_code=status.HTTP_201_CREATED)
+async def doctor_create_patient(
+    user_data: UserCreate,
+    patient_data: PatientCreate,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Doctor-initiated patient account creation"""
+    if current_user.role != UserRole.DOCTOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only doctors can create patient accounts"
+        )
+    
+    # Check if email already exists
+    docs = db.collection("users").where("email", "==", user_data.email).limit(1).stream()
+    if any(docs):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Create user account
+    hashed_password = get_password_hash(user_data.password)
+    new_user = User(
+        email=user_data.email,
+        full_name=user_data.full_name,
+        role=UserRole.PATIENT,
+        hashed_password=hashed_password,
+        is_active=True
+    )
+    
+    user_ref = db.collection("users").document()
+    user_ref.set(new_user.to_firestore())
+    new_user.id = user_ref.id
+    
+    # Create patient profile
+    patient = Patient(
+        user_id=new_user.id,
+        primary_doctor_id=current_user.id,
+        medical_id=generate_medical_id(db),
+        email=new_user.email,
+        **patient_data.model_dump(exclude={"user_id", "primary_doctor_id", "email"})
+    )
+    
+    patient_ref = db.collection("patients").document()
+    patient_ref.set(patient.to_firestore())
+    patient.id = patient_ref.id
+    
+    return patient
+
+
+@router.put("/{patient_id}/assign-doctor/{doctor_id}", response_model=PatientResponse)
+async def assign_doctor(
+    patient_id: str,
+    doctor_id: str,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Assign a primary doctor to a patient (Admin only)"""
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can assign doctors to patients"
+        )
+    
+    patient_ref = db.collection("patients").document(patient_id)
+    if not patient_ref.get().exists:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    doctor_doc = db.collection("users").document(doctor_id).get()
+    if not doctor_doc.exists or doctor_doc.to_dict().get("role") != UserRole.DOCTOR:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+        
+    patient_ref.update({"primary_doctor_id": doctor_id})
+    
+    updated = patient_ref.get()
+    data = updated.to_dict()
+    data['id'] = updated.id
+    return PatientResponse(**data)
+
+
+@router.get("/{patient_id}/health-metrics", response_model=List[HealthMetricResponse])
+async def get_health_metrics(
+    patient_id: str,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get health metrics for a specific patient"""
+    # Check permissions
+    if current_user.role == UserRole.PATIENT:
+        # Need to find patient by user_id
+        docs = db.collection("patients").where("user_id", "==", current_user.id).limit(1).stream()
+        p_doc = None
+        for d in docs: p_doc = d
+        if not p_doc or p_doc.id != patient_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    
+    metrics_docs = db.collection("health_metrics")\
+        .where("patient_id", "==", patient_id)\
+        .order_by("recorded_at", direction="DESCENDING")\
+        .stream()
+        
+    results = []
+    for doc in metrics_docs:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        results.append(HealthMetricResponse(**data))
+    return results
+
+
+@router.post("/{patient_id}/health-metrics", response_model=HealthMetricResponse)
+async def log_health_metric(
+    patient_id: str,
+    metric_data: HealthMetricCreate,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Log a new health metric for a patient"""
+    # Confirm patient exists
+    p_doc = db.collection("patients").document(patient_id).get()
+    if not p_doc.exists:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    # Check permissions
+    if current_user.role == UserRole.PATIENT:
+        if p_doc.to_dict().get("user_id") != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied")
+            
+    metric = HealthMetric(
+        patient_id=patient_id,
+        **metric_data.model_dump()
+    )
+    
+    metric_ref = db.collection("health_metrics").document()
+    metric_ref.set(metric.to_firestore())
+    metric.id = metric_ref.id
+    
+    return metric
