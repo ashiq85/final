@@ -32,10 +32,9 @@ const Dashboard: React.FC = () => {
     const [patientDocuments, setPatientDocuments] = useState<any[]>([]);
     const [upcomingAppointment, setUpcomingAppointment] = useState<Appointment | null>(null);
 
-    // Admin modals
     const [isAddDoctorOpen, setIsAddDoctorOpen] = useState(false);
     const [isAddPatientOpen, setIsAddPatientOpen] = useState(false);
-    const [doctorForm, setDoctorForm] = useState({ full_name: '', email: '', password: '' });
+    const [doctorForm, setDoctorForm] = useState({ full_name: '', email: '', password: '', specialization: '' });
     const [patientForm, setPatientForm] = useState({ full_name: '', email: '', password: '', phone: '', gender: '', date_of_birth: '' });
     const [formError, setFormError] = useState('');
     const [formSuccess, setFormSuccess] = useState('');
@@ -437,6 +436,11 @@ const Dashboard: React.FC = () => {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Temporary Password</label>
                                 <input required type="password" className="input-field" placeholder="Min 8 characters" value={doctorForm.password}
                                     onChange={e => setDoctorForm({ ...doctorForm, password: e.target.value })} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Specialization</label>
+                                <input required className="input-field" placeholder="e.g. Cardiologist, General Physician" value={doctorForm.specialization}
+                                    onChange={e => setDoctorForm({ ...doctorForm, specialization: e.target.value })} />
                             </div>
                             <div className="flex justify-end space-x-3 pt-4">
                                 <button type="button" onClick={() => setIsAddDoctorOpen(false)} className="btn-secondary">Close</button>

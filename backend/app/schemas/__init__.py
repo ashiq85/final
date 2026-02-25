@@ -9,6 +9,7 @@ class UserBase(BaseModel):
     email: EmailStr
     full_name: str
     role: UserRole
+    specialization: Optional[str] = None
 
 
 class UserCreate(UserBase):
@@ -93,6 +94,7 @@ class UserBasic(BaseModel):
     full_name: str
     email: str
     role: UserRole
+    specialization: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -259,3 +261,5 @@ class DiagnosisResponse(BaseModel):
     recommendations: List[str]
     risk_level: str
     emergency_assessment: Optional[EmergencyAssessment] = None
+    booked_appointment_id: Optional[str] = None
+    booked_doctor_name: Optional[str] = None

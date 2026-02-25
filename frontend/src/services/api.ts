@@ -46,15 +46,16 @@ export default api;
 // Patients API
 export const patientsAPI = {
     getAll: () => api.get('/patients/'),
-    getById: (id: number) => api.get(`/patients/${id}`),
+    getById: (id: string) => api.get(`/patients/${id}`),
     create: (data: any) => api.post('/patients/', data),
-    update: (id: number, data: any) => api.put(`/patients/${id}`, data),
+    update: (id: string, data: any) => api.put(`/patients/${id}`, data),
     search: (query: string) => api.get('/patients/search', { params: { query } }),
     getMyProfile: () => api.get('/patients/me'),
     registerByDoctor: (userData: any, patientData: any) =>
         api.post('/patients/register', { user_data: userData, patient_data: patientData }),
-    getHealthMetrics: (patientId: number) => api.get<any[]>(`/patients/${patientId}/health-metrics`),
-    logHealthMetric: (patientId: number, data: any) => api.post<any>(`/patients/${patientId}/health-metrics`, data),
+    getHealthMetrics: (patientId: string) => api.get<any[]>(`/patients/${patientId}/health-metrics`),
+    logHealthMetric: (patientId: string, data: any) => api.post<any>(`/patients/${patientId}/health-metrics`, data),
+    getMedicalRecords: (patientId: string) => api.get<any[]>(`/patients/${patientId}/medical-records`),
 };
 
 // Appointments API
@@ -84,8 +85,8 @@ export const alertsAPI = {
 
 // Diagnosis API
 export const diagnosisAPI = {
-    analyze: (symptoms: string[]) => api.post('/diagnosis/analyze', { symptoms }),
-    getHistory: (patientId: number) => api.get(`/diagnosis/history/${patientId}`),
+    analyze: (symptoms: string[], patientId?: string) => api.post('/diagnosis/analyze', { symptoms, patient_id: patientId }),
+    getHistory: (patientId: string) => api.get(`/diagnosis/history/${patientId}`),
 };
 
 // Documents API

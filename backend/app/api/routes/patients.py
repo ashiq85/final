@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from app.db.base import get_db
 from app.db.models import Patient, User, UserRole, HealthMetric
 from app.schemas import PatientCreate, PatientUpdate, PatientResponse, UserCreate, HealthMetricCreate, HealthMetricResponse
@@ -241,11 +241,11 @@ async def doctor_create_patient(
     db: Any = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Doctor-initiated patient account creation"""
-    if current_user.role != UserRole.DOCTOR:
+    """Doctor/Admin-initiated patient account creation"""
+    if current_user.role not in [UserRole.DOCTOR, UserRole.ADMIN]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only doctors can create patient accounts"
+            detail="Only doctors and admins can create patient accounts"
         )
     
     # Check if email already exists
@@ -394,3 +394,32 @@ async def log_health_metric(
     metric.id = metric_ref.id
     
     return metric
+
+
+@router.get("/{patient_id}/medical-records", response_model=List[Dict[str, Any]])
+async def get_medical_records(
+    patient_id: str,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get a patient's medical records"""
+    # Verify access
+    if current_user.role == UserRole.PATIENT:
+        p_doc = db.collection("patients").where("user_id", "==", current_user.id).limit(1).stream()
+        p_id = None
+        for d in p_doc: p_id = d.id
+        if p_id != patient_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+    docs = db.collection("medical_records")\
+        .where("patient_id", "==", patient_id)\
+        .order_by("visit_date", direction="DESCENDING")\
+        .limit(50)\
+        .stream()
+        
+    results = []
+    for doc in docs:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        results.append(data)
+    return results

@@ -51,6 +51,7 @@ class User(FirestoreModel):
     full_name: str
     role: UserRole
     is_active: bool = True
+    specialization: Optional[str] = None
 
 
 class Patient(FirestoreModel):

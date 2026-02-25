@@ -12,6 +12,7 @@ const PatientManagement: React.FC = () => {
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
     const [activeTab, setActiveTab] = useState<'info' | 'metrics'>('info');
     const [metrics, setMetrics] = useState<any[]>([]);
+    const [records, setRecords] = useState<any[]>([]);
     const [isLogging, setIsLogging] = useState(false);
     const [newMetric, setNewMetric] = useState({ metric_name: 'blood_sugar_before', value: '', unit: 'mg/dL' });
 
@@ -180,12 +181,15 @@ const PatientManagement: React.FC = () => {
                                     onClick={async () => {
                                         setActiveTab('metrics');
                                         try {
-                                            const res = await patientsAPI.getHealthMetrics(selectedPatient.id);
+                                            // Fetch both health metrics and medical records
+                                            const res = await patientsAPI.getHealthMetrics(selectedPatient.id as string);
                                             setMetrics(res.data);
+                                            const recRes = await patientsAPI.getMedicalRecords(selectedPatient.id as string);
+                                            setRecords(recRes.data);
                                         } catch (e) { console.error(e); }
                                     }}
                                 >
-                                    Health Metrics & Trends
+                                    Health Metrics & Records
                                 </button>
                             </div>
 
@@ -296,6 +300,53 @@ const PatientManagement: React.FC = () => {
                                     </div>
                                 </div>
                             )}
+
+                            {/* Medical Records Secton */}
+                            {activeTab === 'metrics' && (
+                                <div className="p-6 border-t border-gray-100">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h4 className="text-lg font-bold text-gray-900">Medical Records</h4>
+                                    </div>
+                                    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                                        <table className="min-w-full divide-y divide-gray-200">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Diagnosis</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Symptoms</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Treatment Notes</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="bg-white divide-y divide-gray-200">
+                                                {records.length > 0 ? (
+                                                    records.map((r, i) => (
+                                                        <tr key={i} className="hover:bg-primary-50">
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                                {new Date(r.visit_date).toLocaleDateString()}
+                                                            </td>
+                                                            <td className="px-6 py-4 text-sm font-medium text-gray-900 border-l-4 border-primary-500">
+                                                                {r.diagnosis ?? 'Pending Analysis'}
+                                                            </td>
+                                                            <td className="px-6 py-4 text-sm text-gray-500">
+                                                                {(r.symptoms || []).join(', ')}
+                                                            </td>
+                                                            <td className="px-6 py-4 text-sm text-gray-500 italic max-w-sm truncate">
+                                                                {r.treatment_plan ?? 'N/A'}
+                                                            </td>
+                                                        </tr>
+                                                    ))
+                                                ) : (
+                                                    <tr>
+                                                        <td colSpan={4} className="px-6 py-4 text-center text-sm text-gray-500">
+                                                            No medical records found for this patient.
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <div className="bg-white shadow rounded-lg p-12 text-center text-gray-500 flex flex-col items-center justify-center">
@@ -305,6 +356,7 @@ const PatientManagement: React.FC = () => {
                     )}
                 </div>
             </div>
+
             {/* Add Patient Modal */}
             {isAddPatientOpen && (
                 <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Dict, Any
 from app.db.base import get_db
-from app.db.models import User, Patient, HealthMetric
+from app.db.models import User, Patient, HealthMetric, UserRole
 from app.api.routes.auth import get_current_user
 from app.schemas import SymptomAnalysisRequest, DiagnosisResponse, EmergencyAssessment
 from app.agents.diagnosis_agent import analyze_symptoms as analyze_with_agent
@@ -34,7 +34,7 @@ def detect_stroke_symptoms(symptoms: list, vitals: dict) -> dict:
 def detect_heart_attack(symptoms: list, vitals: dict) -> dict:
     chest_pain = any("chest" in s.lower() for s in symptoms)
     shortness_of_breath = any("breath" in s.lower() for s in symptoms)
-    is_emergency = chest_pain and shortness_of_breath
+    is_emergency = chest_pain or shortness_of_breath
     return {
         "is_emergency": is_emergency,
         "condition": "Possible Heart Attack",
@@ -112,13 +112,16 @@ async def analyze_symptoms(
     
     # AI Agent Deep Analysis
     ai_result = {}
+    p_id = request.patient_id
     
-    # Use provided patient_id, or fallback to current user's ID
-    p_id = request.patient_id or getattr(current_user, 'id', "unknown")
-    
+    # Try to resolve patient ID from user if not explicitly passed
+    if current_user.role == UserRole.PATIENT and not p_id:
+        p_doc = db.collection("patients").where("user_id", "==", getattr(current_user, 'id', None)).limit(1).stream()
+        for d in p_doc: p_id = d.id
+        
     try:
         ai_result = analyze_with_agent(
-            patient_id=p_id,
+            patient_id=p_id or getattr(current_user, 'id', "anonymous"),
             symptoms=request.symptoms,
             vitals=vitals
         )
@@ -134,20 +137,122 @@ async def analyze_symptoms(
                 if r not in recommendations:
                     recommendations.append(r)
         
-        # AI risk level takes precedence if higher
-        risk_map = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
-        ai_risk = ai_result.get("risk_level", "LOW")
-        if risk_map.get(ai_risk, 0) > risk_map.get(risk_level, 0):
-            risk_level = ai_risk
-            
     except Exception as e:
         logger.error(f"AI Analysis failed: {e}")
+
+    # AI risk level takes precedence if higher
+    risk_map = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+    ai_risk = ai_result.get("risk_level", "LOW")
+    if risk_map.get(ai_risk, 0) > risk_map.get(risk_level, 0):
+        risk_level = ai_risk
+        
+    # Guarantee we have at least one diagnosis and recommendation for the UI
+    if not potential_diagnosis:
+        potential_diagnosis.append(f"AI Quota Exceeded: Unable to determine diagnosis for symptoms.")
+    if not recommendations:
+        recommendations.append("Please consult a healthcare professional immediately for proper evaluation.")
+
+    # Process Emergency Booking & Saving Record
+    # We always have a current_user since it's an authenticated route
+    use_id = p_id if (p_id and p_id != "anonymous") else current_user.id
+    booked_appointment_id = None
+    booked_doctor_name = None
+    from datetime import datetime, timedelta
+    
+    # 1. Save to medical records
+    record_data = {
+        "patient_id": use_id,
+        "visit_date": datetime.utcnow(),
+        "symptoms": request.symptoms,
+        "vitals": vitals,
+        "diagnosis": ", ".join(potential_diagnosis) if potential_diagnosis else "Pending Analysis",
+        "treatment_plan": ", ".join(recommendations) if recommendations else "N/A",
+        "created_by": current_user.id
+    }
+    db.collection("medical_records").document().set(record_data)
+    # 2. Handle emergency booking
+    if risk_level in ["HIGH", "CRITICAL"]:
+        # Basic text-matching for specialization
+        specialization = "General Physician"
+        sym_text = " ".join(request.symptoms).lower()
+        diag_text = " ".join(potential_diagnosis).lower()
+        combined = sym_text + " " + diag_text
+        
+        if any(w in combined for w in ["heart", "chest", "cardiac", "stroke"]):
+            specialization = "Cardiologist"
+        elif any(w in combined for w in ["neuro", "head", "brain"]):
+            specialization = "Neurologist"
+            
+        # Find a doctor matching this
+        doctor_docs = db.collection("users").where("role", "==", UserRole.DOCTOR.value).where("is_active", "==", True).stream()
+        target_doctor_id = None
+        target_doctor_name = None
+        fallback_doctor_id = None
+        fallback_doctor_name = None
+        for d in doctor_docs:
+            d_data = d.to_dict()
+            fallback_doctor_id = d.id
+            fallback_doctor_name = d_data.get("full_name", "Doctor")
+            if d_data.get("specialization") and d_data["specialization"].lower() == specialization.lower():
+                target_doctor_id = d.id
+                target_doctor_name = d_data.get("full_name", "Doctor")
+                break
+                
+        if not target_doctor_id:
+            target_doctor_id = fallback_doctor_id
+            target_doctor_name = fallback_doctor_name
+            
+        if target_doctor_id:
+            # Book appointment for within the next hour
+            apt_date = datetime.utcnow() + timedelta(hours=1)
+            
+            # Check for existing pending emergency appointments to avoid spam
+            existing = db.collection("appointments").where("patient_id", "==", use_id).where("status", "==", "scheduled").stream()
+            already_booked = False
+            for e in existing:
+                e_data = e.to_dict()
+                if e_data.get("reason", "").startswith("EMERGENCY AUTO-BOOK:"):
+                    already_booked = True
+                    break
+            
+            if not already_booked:
+                db_appointment = {
+                    "patient_id": use_id,
+                    "doctor_id": target_doctor_id,
+                    "appointment_date": apt_date,
+                    "duration_minutes": 30,
+                    "status": "scheduled",
+                    "reason": f"EMERGENCY AUTO-BOOK: {specialization} required immediately.",
+                    "is_follow_up": False,
+                    "created_at": datetime.utcnow()
+                }
+                appt_ref = db.collection("appointments").document()
+                appt_ref.set(db_appointment)
+                booked_appointment_id = appt_ref.id
+                booked_doctor_name = target_doctor_name
+                logger.info(f"Emergency appointment booked: {appt_ref.id} with doctor {target_doctor_name}")
+                
+                # Notify patient
+                notif_data = {
+                    "user_id": current_user.id,
+                    "notification_type": "alert",
+                    "title": "Emergency Appointment Booked",
+                    "message": f"An emergency appointment has been booked for you with {target_doctor_name} ({specialization}).",
+                    "appointment_id": appt_ref.id,
+                    "is_read": False,
+                    "created_at": datetime.utcnow()
+                }
+                db.collection("notifications").document().set(notif_data)
+            else:
+                logger.info(f"Emergency appointment already booked for patient {use_id}, skipping duplicate.")
 
     return DiagnosisResponse(
         potential_diagnosis=potential_diagnosis,
         recommendations=recommendations,
         risk_level=risk_level,
-        emergency_assessment=emergency
+        emergency_assessment=emergency,
+        booked_appointment_id=booked_appointment_id,
+        booked_doctor_name=booked_doctor_name
     )
 
 

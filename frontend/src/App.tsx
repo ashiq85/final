@@ -8,7 +8,6 @@ import Signup from './pages/Signup';
 import Dashboard from './pages/Dashboard';
 import Appointments from './pages/Appointments';
 import ClinicalSupport from './pages/ClinicalSupport';
-import Documents from './pages/Documents';
 import Alerts from './pages/Alerts';
 import Reports from './pages/Reports';
 import PatientManagement from './pages/PatientManagement';
@@ -72,16 +71,6 @@ const AppRoutes: React.FC = () => {
           <ProtectedRoute>
             <Layout>
               <ClinicalSupport />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/documents"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <Documents />
             </Layout>
           </ProtectedRoute>
         }

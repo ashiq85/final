@@ -5,7 +5,6 @@ import {
     LayoutDashboard,
     Calendar,
     Activity,
-    FileText,
     Bell,
     LogOut,
     Heart,
@@ -24,7 +23,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             : []),
         { name: 'Appointments', href: '/appointments', icon: Calendar },
         { name: 'Clinical Support', href: '/clinical-support', icon: Activity },
-        { name: 'Documents', href: '/documents', icon: FileText },
         { name: 'Alerts', href: '/alerts', icon: Bell },
         { name: 'Health Reports', href: '/reports', icon: Heart },
     ];

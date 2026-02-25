@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.routes import auth, admin, patients, appointments, diagnosis, documents, alerts, reports
+from app.api.routes import auth, admin, patients, appointments, diagnosis, alerts
 from app.db.firebase_config import get_firestore_client
 import logging
 
@@ -25,7 +25,16 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,9 +46,7 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(patients.router, prefix="/api")
 app.include_router(appointments.router, prefix="/api")
 app.include_router(diagnosis.router, prefix="/api")
-app.include_router(documents.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
-app.include_router(reports.router, prefix="/api")
 
 
 @app.on_event("startup")

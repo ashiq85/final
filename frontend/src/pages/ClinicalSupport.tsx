@@ -2,24 +2,28 @@ import React, { useState } from 'react';
 import { diagnosisAPI } from '../services/api';
 import { Activity, AlertTriangle, CheckCircle, Info, Brain, FlaskConical, Stethoscope } from 'lucide-react';
 
-const ClinicalSupport: React.FC = () => {
+const ClinicalSupport: React.FC<{ patientId?: string }> = ({ patientId }) => {
     const [symptoms, setSymptoms] = useState('');
     const [result, setResult] = useState<any>(null);
+    const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!symptoms.trim()) {
+            setError('Please enter at least one symptom before analyzing.');
             return;
         }
 
         try {
             setIsLoading(true);
+            setError(null);
             const symptomList = symptoms.split(/[,\n]/).map(s => s.trim()).filter(s => s);
-            const response = await diagnosisAPI.analyze(symptomList);
+            const response = await diagnosisAPI.analyze(symptomList, patientId);
             setResult(response.data);
-        } catch (error) {
-            console.error('Analysis error:', error);
+        } catch (err: any) {
+            console.error('Analysis error:', err);
+            setError(err.response?.data?.detail || err.message || 'Analysis failed. Please check backend logs.');
         } finally {
             setIsLoading(false);
         }
@@ -92,6 +96,12 @@ const ClinicalSupport: React.FC = () => {
 
                 {/* Analysis Results Display */}
                 <div className="lg:col-span-2 space-y-6">
+                    {error && (
+                        <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl flex items-start mb-6">
+                            <AlertTriangle className="h-5 w-5 mr-3 flex-shrink-0" />
+                            <p className="text-sm font-medium">{error}</p>
+                        </div>
+                    )}
                     {isLoading ? (
                         <div className="card flex flex-col items-center justify-center py-24 bg-gray-50 border-dashed border-2">
                             <Brain className="h-16 w-16 text-primary-200 animate-pulse mb-6" />
@@ -104,6 +114,24 @@ const ClinicalSupport: React.FC = () => {
                         </div>
                     ) : result ? (
                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            {/* Emergency Booking Confirmation */}
+                            {result.booked_appointment_id && (
+                                <div className="bg-green-50 border-l-8 border-green-500 p-6 rounded-r-xl shadow-sm mb-6 animate-in fade-in zoom-in duration-700">
+                                    <div className="flex items-center">
+                                        <div className="bg-green-100 p-2 rounded-full mr-4">
+                                            <Calendar className="h-6 w-6 text-green-600" />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-lg font-bold text-green-900">Emergency Appointment Booked!</h4>
+                                            <p className="text-green-800 text-sm">
+                                                We've automatically scheduled an immediate priority session with <strong>{result.booked_doctor_name || 'a specialist'}</strong>.
+                                            </p>
+                                            <p className="text-xs text-green-600 mt-1">Check your Appointments tab for details.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Emergency Alert Widget */}
                             {result.emergency_assessment?.is_emergency && (
                                 <div className="bg-red-50 border-l-8 border-red-500 p-6 rounded-r-xl shadow-sm">
