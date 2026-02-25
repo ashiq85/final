@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { User } from '../types';
-import * as authService from '../services/auth.service';
-import { jwtDecode } from 'jwt-decode';
+import { auth } from '../services/firebase';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import api from '../services/api';
 
 interface AuthContextType {
     user: User | null;
@@ -19,60 +20,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
     const [isLoading, setIsLoading] = useState<boolean>(true);
 
-    useEffect(() => {
-        const initAuth = async () => {
-            const token = localStorage.getItem('token');
-            if (token) {
-                try {
-                    const decoded: any = jwtDecode(token);
-                    const currentTime = Date.now() / 1000;
+    async function logout() {
+        try {
+            await signOut(auth);
+        } catch (error) {
+            console.error('Firebase sign out error', error);
+        }
+        setUser(null);
+        setIsAuthenticated(false);
+    }
 
-                    if (decoded.exp < currentTime) {
-                        logout();
-                    } else {
-                        const currentUser = await authService.getCurrentUser();
-                        setUser(currentUser);
-                        setIsAuthenticated(true);
-                    }
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+            if (firebaseUser) {
+                try {
+                    // Firebase manages the token. The API interceptor will use auth.currentUser.getIdToken()
+                    const res = await api.get('/auth/me');
+                    setUser(res.data);
+                    setIsAuthenticated(true);
                 } catch (error) {
-                    console.error('Auth initialization error:', error);
+                    console.error('Failed to fetch user details from backend:', error);
+                    // If backend fails, they aren't fully authenticated in our system
                     logout();
                 }
+            } else {
+                setUser(null);
+                setIsAuthenticated(false);
             }
             setIsLoading(false);
-        };
+        });
 
-        initAuth();
+        return () => unsubscribe();
     }, []);
 
     const login = async (credentials: any) => {
-        try {
-            const response = await authService.login(credentials);
-            localStorage.setItem('token', response.access_token);
-
-            // Fetch user info after successful login
-            const currentUser = await authService.getCurrentUser();
-            setUser(currentUser);
-            setIsAuthenticated(true);
-        } catch (error) {
-            throw error;
-        }
+        // Log in via Firebase
+        await signInWithEmailAndPassword(auth, credentials.email, credentials.password);
+        // onAuthStateChanged will handle fetching the user role and setting state
     };
 
     const register = async (userData: any) => {
-        try {
-            await authService.register(userData);
-            // Auto login after register
-            await login({ email: userData.email, password: userData.password });
-        } catch (error) {
-            throw error;
-        }
-    };
+        // Note: For custom claims/roles, the backend /auth/signup still needs to be called to save to Firestore.
+        // We do this via authService, which calls the backend. 
+        // The backend signup endpoint we modified ALREADY creates the Firebase Auth user!
 
-    const logout = () => {
-        localStorage.removeItem('token');
-        setUser(null);
-        setIsAuthenticated(false);
+        // So we just call the API. It will create the auth user and the firestore doc.
+        await api.post('/auth/signup', userData);
+
+        // Then we log in via Firebase client SDK to establish the session.
+        await signInWithEmailAndPassword(auth, userData.email, userData.password);
     };
 
     return (

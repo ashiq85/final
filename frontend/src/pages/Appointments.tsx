@@ -192,7 +192,7 @@ const Appointments: React.FC = () => {
                     <div>
                         <p className="text-xs font-semibold text-primary-700 uppercase">Upcoming</p>
                         <p className="text-2xl font-bold text-gray-900">
-                            {appointments.filter(a => upcomingStatuses.includes(a.status)).length}
+                            {appointments.filter(a => (upcomingStatuses as readonly string[]).includes(a.status)).length}
                         </p>
                     </div>
                 </div>

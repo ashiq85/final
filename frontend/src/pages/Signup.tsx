@@ -28,7 +28,8 @@ const Signup: React.FC = () => {
             await register(formData);
             navigate('/dashboard');
         } catch (err: any) {
-            setError(err.response?.data?.detail || 'Failed to sign up');
+            console.error('Signup error:', err);
+            setError(err.message || err.response?.data?.detail || 'Failed to sign up');
         } finally {
             setLoading(false);
         }

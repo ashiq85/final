@@ -28,6 +28,9 @@ const Dashboard: React.FC = () => {
     const [isLogModalOpen, setIsLogModalOpen] = useState(false);
     const [newMetric, setNewMetric] = useState({ metric_name: 'blood_sugar_before', value: '', unit: 'mg/dL', notes: '' });
     const [diagnosis, setDiagnosis] = useState<any>(null);
+    const [stats, setStats] = useState({ total_doctors: 0, total_patients: 0, active_alerts: 0, pending_visits: 0 });
+    const [patientDocuments, setPatientDocuments] = useState<any[]>([]);
+    const [upcomingAppointment, setUpcomingAppointment] = useState<Appointment | null>(null);
 
     // Admin modals
     const [isAddDoctorOpen, setIsAddDoctorOpen] = useState(false);
@@ -48,6 +51,11 @@ const Dashboard: React.FC = () => {
                 setAlerts(alertsRes.data);
                 setAppointments(aptsRes.data);
 
+                if (user.role === 'admin' || user.role === 'doctor') {
+                    const statsRes = await adminAPI.getStats();
+                    setStats(statsRes.data);
+                }
+
                 if (user.role === 'patient') {
                     const profileRes = await api.get('/patients/me');
                     setPatientProfile(profileRes.data);
@@ -60,6 +68,17 @@ const Dashboard: React.FC = () => {
                         patient_id: profileRes.data.id
                     });
                     setDiagnosis(diagRes.data);
+                    // Get real documents
+                    const docsRes = await api.get(`/documents/patient/${profileRes.data.id}`);
+                    setPatientDocuments(docsRes.data);
+
+                    // Find next appointment
+                    if (aptsRes.data.length > 0) {
+                        const scheduled = aptsRes.data
+                            .filter(a => new Date(a.appointment_date) > new Date())
+                            .sort((a, b) => new Date(a.appointment_date).getTime() - new Date(b.appointment_date).getTime());
+                        if (scheduled.length > 0) setUpcomingAppointment(scheduled[0]);
+                    }
                 }
             } catch (error) {
                 console.error('Error loading dashboard data:', error);
@@ -126,10 +145,10 @@ const Dashboard: React.FC = () => {
     const renderAdminDashboard = () => (
         <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <StatCard title="Total Doctors" value="12" icon={Users} color="blue" />
-                <StatCard title="Total Patients" value="156" icon={Users} color="green" />
-                <StatCard title="Active Alerts" value={alerts.length.toString()} icon={AlertCircle} color="red" />
-                <StatCard title="Pending Visits" value="8" icon={Calendar} color="amber" />
+                <StatCard title="Total Doctors" value={stats.total_doctors.toString()} icon={Users} color="blue" />
+                <StatCard title="Total Patients" value={stats.total_patients.toString()} icon={Users} color="green" />
+                <StatCard title="Active Alerts" value={stats.active_alerts.toString()} icon={AlertCircle} color="red" />
+                <StatCard title="Pending Visits" value={stats.pending_visits.toString()} icon={Calendar} color="amber" />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -306,8 +325,13 @@ const Dashboard: React.FC = () => {
                             <Link to="/documents" className="text-sm font-medium text-primary-600 hover:text-primary-700">View all</Link>
                         }>
                             <div className="space-y-3">
-                                <DocumentItem name="Lab Results - Blood Work" date="Oct 12, 2023" />
-                                <DocumentItem name="Prescription - Vitamin D" date="Sep 28, 2023" />
+                                {patientDocuments.length > 0 ? (
+                                    patientDocuments.slice(0, 3).map(doc => (
+                                        <DocumentItem key={doc.id} name={doc.filename} date={new Date(doc.uploaded_at || Date.now()).toLocaleDateString()} />
+                                    ))
+                                ) : (
+                                    <p className="text-sm text-gray-500 py-2">No documents uploaded yet.</p>
+                                )}
                             </div>
                         </DashboardCard>
                     </div>
@@ -315,17 +339,30 @@ const Dashboard: React.FC = () => {
 
                 <div className="lg:col-span-1 space-y-6">
                     <DashboardCard title="Upcoming Visit" icon={Calendar} className="bg-primary-50">
-                        <div className="text-center p-4">
-                            <div className="text-3xl font-bold text-primary-600 mb-1">15</div>
-                            <div className="text-sm font-medium text-primary-500 uppercase tracking-wide">October</div>
-                            <div className="mt-4 p-3 bg-white rounded-lg shadow-sm inline-block">
-                                <p className="text-sm font-bold text-gray-900">10:30 AM</p>
-                                <p className="text-xs text-gray-500">General Checkup</p>
+                        {upcomingAppointment ? (
+                            <div className="text-center p-4">
+                                <div className="text-3xl font-bold text-primary-600 mb-1">
+                                    {new Date(upcomingAppointment.appointment_date).getDate()}
+                                </div>
+                                <div className="text-sm font-medium text-primary-500 uppercase tracking-wide">
+                                    {new Date(upcomingAppointment.appointment_date).toLocaleString('default', { month: 'long' })}
+                                </div>
+                                <div className="mt-4 p-3 bg-white rounded-lg shadow-sm inline-block">
+                                    <p className="text-sm font-bold text-gray-900">
+                                        {new Date(upcomingAppointment.appointment_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </p>
+                                    <p className="text-xs text-gray-500">{upcomingAppointment.reason}</p>
+                                </div>
+                                <div className="mt-6">
+                                    <Link to="/appointments" className="btn-secondary w-full text-sm inline-block">Manage Visits</Link>
+                                </div>
                             </div>
-                            <div className="mt-6">
-                                <button className="btn-secondary w-full text-sm">Reschedule</button>
+                        ) : (
+                            <div className="text-center p-6">
+                                <p className="text-sm text-gray-500 mb-4">No upcoming visits scheduled.</p>
+                                <Link to="/appointments" className="btn-primary w-full text-sm inline-block">Book Now</Link>
                             </div>
-                        </div>
+                        )}
                     </DashboardCard>
 
                     <DashboardCard title="Recommended Actions" icon={AlertCircle}>

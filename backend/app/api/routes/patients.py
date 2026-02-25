@@ -8,6 +8,7 @@ from app.core.security import get_password_hash
 import random
 import string
 import logging
+from firebase_admin import auth as firebase_auth
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,25 @@ async def search_patients(
             for p_doc in p_docs:
                 data = p_doc.to_dict()
                 data['id'] = p_doc.id
+                
+                # Attach user data
+                user_data = u_doc.to_dict()
+                user_data['id'] = u_doc.id
+                data['user'] = user_data
+                
                 results.append(PatientResponse(**data))
+    else:
+        # If we got results by medical_id, we still need to attach user data
+        for i, res in enumerate(results):
+            if not getattr(res, 'user', None):
+                user_doc = db.collection("users").document(res.user_id).get()
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
+                    user_data['id'] = user_doc.id
+                    # Update the result in the list
+                    data = res.model_dump()
+                    data['user'] = user_data
+                    results[i] = PatientResponse(**data)
 
     return results
 
@@ -140,6 +159,16 @@ async def get_patient(
     
     data = doc.to_dict()
     data['id'] = doc.id
+    
+    # Attach user data
+    user_id = data.get('user_id')
+    if user_id:
+        user_doc = db.collection("users").document(user_id).get()
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            user_data['id'] = user_doc.id
+            data['user'] = user_data
+            
     return PatientResponse(**data)
 
 
@@ -183,12 +212,23 @@ async def list_patients(
             detail="Not authorized to view all patients"
         )
     
-    # Firestore pagination (simplified for now with just limit)
     docs = db.collection("patients").limit(limit).stream()
     results = []
+    
+    # Pre-fetch all user info to avoid N+1 querying 
     for doc in docs:
         data = doc.to_dict()
         data['id'] = doc.id
+        
+        # Manually fetch the corresponding user profile!
+        user_id = data.get('user_id')
+        if user_id:
+            user_doc = db.collection("users").document(user_id).get()
+            if user_doc.exists:
+                user_data = user_doc.to_dict()
+                user_data['id'] = user_doc.id
+                data['user'] = user_data
+                
         results.append(PatientResponse(**data))
     
     return results
@@ -216,7 +256,27 @@ async def doctor_create_patient(
             detail="Email already registered"
         )
     
-    # Create user account
+    # Create user account in Firebase Auth
+    try:
+        # Check if user already exists in Firebase Auth to prevent errors
+        try:
+            firebase_user = firebase_auth.get_user_by_email(user_data.email)
+            firebase_uid = firebase_user.uid
+        except firebase_auth.UserNotFoundError:
+            firebase_user = firebase_auth.create_user(
+                email=user_data.email,
+                password=user_data.password,
+                display_name=user_data.full_name
+            )
+            firebase_uid = firebase_user.uid
+    except Exception as e:
+        logger.error(f"Failed to create Firebase Auth user: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create Firebase authentication account: {str(e)}"
+        )
+
+    # Continue with custom JWT logic for now, but link the Firestore doc ID to the Firebase UID
     hashed_password = get_password_hash(user_data.password)
     new_user = User(
         email=user_data.email,
@@ -226,9 +286,10 @@ async def doctor_create_patient(
         is_active=True
     )
     
-    user_ref = db.collection("users").document()
+    # We use the firebase_uid as the document ID in Firestore for consistency!
+    user_ref = db.collection("users").document(firebase_uid)
     user_ref.set(new_user.to_firestore())
-    new_user.id = user_ref.id
+    new_user.id = firebase_uid
     
     # Create patient profile
     patient = Patient(

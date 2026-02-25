@@ -112,33 +112,36 @@ async def analyze_symptoms(
     
     # AI Agent Deep Analysis
     ai_result = {}
-    if request.patient_id:
-        try:
-            ai_result = analyze_with_agent(
-                patient_id=request.patient_id,
-                symptoms=request.symptoms,
-                vitals=vitals
-            )
-            # Merge AI results if they provide more insight
-            if "potential_diagnosis" in ai_result:
-                # Add unique diagnoses from AI
-                for d in ai_result["potential_diagnosis"]:
-                    if d not in potential_diagnosis:
-                        potential_diagnosis.append(d)
+    
+    # Use provided patient_id, or fallback to current user's ID
+    p_id = request.patient_id or getattr(current_user, 'id', "unknown")
+    
+    try:
+        ai_result = analyze_with_agent(
+            patient_id=p_id,
+            symptoms=request.symptoms,
+            vitals=vitals
+        )
+        # Merge AI results if they provide more insight
+        if "potential_diagnosis" in ai_result:
+            # Add unique diagnoses from AI
+            for d in ai_result["potential_diagnosis"]:
+                if d not in potential_diagnosis:
+                    potential_diagnosis.append(d)
+        
+        if "recommendations" in ai_result:
+            for r in ai_result["recommendations"]:
+                if r not in recommendations:
+                    recommendations.append(r)
+        
+        # AI risk level takes precedence if higher
+        risk_map = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+        ai_risk = ai_result.get("risk_level", "LOW")
+        if risk_map.get(ai_risk, 0) > risk_map.get(risk_level, 0):
+            risk_level = ai_risk
             
-            if "recommendations" in ai_result:
-                for r in ai_result["recommendations"]:
-                    if r not in recommendations:
-                        recommendations.append(r)
-            
-            # AI risk level takes precedence if higher
-            risk_map = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
-            ai_risk = ai_result.get("risk_level", "LOW")
-            if risk_map.get(ai_risk, 0) > risk_map.get(risk_level, 0):
-                risk_level = ai_risk
-                
-        except Exception as e:
-            logger.error(f"AI Analysis failed: {e}")
+    except Exception as e:
+        logger.error(f"AI Analysis failed: {e}")
 
     return DiagnosisResponse(
         potential_diagnosis=potential_diagnosis,

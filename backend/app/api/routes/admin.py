@@ -5,6 +5,10 @@ from app.db.models import User, UserRole, Patient
 from app.schemas import UserCreate, UserResponse, PatientResponse
 from app.api.routes.auth import get_current_user
 from app.core.security import get_password_hash
+from firebase_admin import auth as firebase_auth
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -40,6 +44,25 @@ async def create_doctor(
             detail="Email already registered"
         )
     
+    # Create user account in Firebase Auth
+    try:
+        try:
+            firebase_user = firebase_auth.get_user_by_email(doctor_data.email)
+            firebase_uid = firebase_user.uid
+        except firebase_auth.UserNotFoundError:
+            firebase_user = firebase_auth.create_user(
+                email=doctor_data.email,
+                password=doctor_data.password,
+                display_name=doctor_data.full_name
+            )
+            firebase_uid = firebase_user.uid
+    except Exception as e:
+        logger.error(f"Failed to create Firebase Auth user for Doctor: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create Firebase authentication account: {str(e)}"
+        )
+
     hashed_password = get_password_hash(doctor_data.password)
     new_doctor = User(
         email=doctor_data.email,
@@ -49,9 +72,10 @@ async def create_doctor(
         is_active=True
     )
     
-    doc_ref = db.collection("users").document()
+    # Use Firebase UID as Firestore Document ID
+    doc_ref = db.collection("users").document(firebase_uid)
     doc_ref.set(new_doctor.to_firestore())
-    new_doctor.id = doc_ref.id
+    new_doctor.id = firebase_uid
     
     return new_doctor
 
@@ -120,6 +144,16 @@ async def get_all_patients(
     for doc in docs:
         data = doc.to_dict()
         data['id'] = doc.id
+        
+        # Attach user data
+        user_id = data.get('user_id')
+        if user_id:
+            user_doc = db.collection("users").document(user_id).get()
+            if user_doc.exists:
+                user_data = user_doc.to_dict()
+                user_data['id'] = user_doc.id
+                data['user'] = user_data
+        
         results.append(PatientResponse(**data))
     return results
 
@@ -163,3 +197,31 @@ async def get_all_users(
         data['id'] = doc.id
         results.append(UserResponse(**data))
     return results
+
+
+@router.get("/stats")
+async def get_system_stats(
+    db: Any = Depends(get_db),
+    admin: User = Depends(get_current_user) # Allow doctors to see some stats too? Maybe just for admin dashboard
+):
+    """Get summary statistics for the dashboard"""
+    # Simple count for users by role
+    doctors_docs = db.collection("users").where("role", "==", UserRole.DOCTOR).stream()
+    doctors_count = sum(1 for _ in doctors_docs)
+    
+    patients_docs = db.collection("patients").stream()
+    patients_count = sum(1 for _ in patients_docs)
+    
+    alerts_docs = db.collection("alerts").where("is_resolved", "==", False).stream()
+    alerts_count = sum(1 for _ in alerts_docs)
+    
+    # Mocking pending visits for now as appointments count
+    visits_docs = db.collection("appointments").stream()
+    visits_count = sum(1 for _ in visits_docs)
+    
+    return {
+        "total_doctors": doctors_count,
+        "total_patients": patients_count,
+        "active_alerts": alerts_count,
+        "pending_visits": visits_count
+    }

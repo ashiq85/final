@@ -11,6 +11,7 @@ from functools import wraps
 import random
 import string
 import logging
+from firebase_admin import auth as firebase_auth
 
 logger = logging.getLogger(__name__)
 
@@ -36,22 +37,25 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Any = Depends(get_db)
 ) -> User:
-    """Get current authenticated user"""
+    """Get current authenticated user from Firebase ID Token"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    payload = decode_access_token(token)
-    if payload is None:
+    try:
+        # Verify the Firebase ID token
+        payload = firebase_auth.verify_id_token(token)
+    except Exception as e:
+        logger.error(f"Error validating Firebase token: {e}")
         raise credentials_exception
-    
-    email: str = payload.get("sub")
+        
+    email: str = payload.get("email")
     if email is None:
         raise credentials_exception
     
-    # Firestore query
+    # Firestore query to get the rich user profile
     docs = db.collection("users").where("email", "==", email).limit(1).stream()
     user_doc = None
     for doc in docs:
@@ -102,7 +106,26 @@ async def signup(
             detail="Email already registered"
         )
     
-    # Create new user
+    # Create user in Firebase Auth
+    try:
+        try:
+            firebase_user = firebase_auth.get_user_by_email(user_data.email)
+            firebase_uid = firebase_user.uid
+        except firebase_auth.UserNotFoundError:
+            firebase_user = firebase_auth.create_user(
+                email=user_data.email,
+                password=user_data.password,
+                display_name=user_data.full_name
+            )
+            firebase_uid = firebase_user.uid
+    except Exception as e:
+        logger.error(f"Failed to create Firebase Auth user for Signup: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create authentication account: {str(e)}"
+        )
+
+    # Continue caching in Firestore
     hashed_password = get_password_hash(user_data.password)
     new_user = User(
         email=user_data.email,
@@ -112,10 +135,10 @@ async def signup(
         is_active=True
     )
     
-    # Save to Firestore
-    user_ref = db.collection("users").document()
+    # Save to Firestore using Firebase UID
+    user_ref = db.collection("users").document(firebase_uid)
     user_ref.set(new_user.to_firestore())
-    new_user.id = user_ref.id
+    new_user.id = firebase_uid
     
     # Create patient profile with medical ID
     try:
@@ -135,45 +158,8 @@ async def signup(
     return new_user
 
 
-@router.post("/login", response_model=Token)
-async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Any = Depends(get_db)
-):
-    """Login endpoint"""
-    # Firestore query
-    docs = db.collection("users").where("email", "==", form_data.username).limit(1).stream()
-    user_doc = None
-    for doc in docs:
-        user_doc = doc
-        break
-        
-    if not user_doc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    user_data = user_doc.to_dict()
-    if not verify_password(form_data.password, user_data.get("hashed_password", "")):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    if not user_data.get("is_active", True):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
-        )
-    
-    access_token = create_access_token(
-        data={"sub": user_data["email"], "role": user_data["role"]}
-    )
-    
-    return {"access_token": access_token, "token_type": "bearer"}
+# Login endpoint removed. Authentication is now handled by the Firebase JS SDK on the frontend,
+# which provides an ID token that is verified by `get_current_user`.
 
 
 @router.get("/me", response_model=UserResponse)

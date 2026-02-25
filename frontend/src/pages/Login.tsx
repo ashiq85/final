@@ -20,7 +20,9 @@ const Login: React.FC = () => {
             await login({ email, password });
             navigate('/dashboard');
         } catch (err: any) {
-            setError(err.response?.data?.detail || 'Failed to login');
+            console.error('Login error:', err);
+            // Firebase errors usually have a message property
+            setError(err.message || err.response?.data?.detail || 'Failed to login');
         } finally {
             setLoading(false);
         }

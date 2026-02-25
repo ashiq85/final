@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type { Appointment } from '../types';
+import { auth } from './firebase';
 
 const api = axios.create({
     baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
@@ -10,9 +11,11 @@ const api = axios.create({
 
 // Add request interceptor to add auth token
 api.interceptors.request.use(
-    (config) => {
-        const token = localStorage.getItem('token');
-        if (token) {
+    async (config) => {
+        // Fetch the current Firebase ID token
+        const user = auth.currentUser;
+        if (user) {
+            const token = await user.getIdToken();
             config.headers.Authorization = `Bearer ${token}`;
         }
         return config;
@@ -29,10 +32,10 @@ api.interceptors.response.use(
     },
     (error) => {
         if (error.response && error.response.status === 401) {
-            // Clear local storage and redirect to login if unauthorized
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            window.location.href = '/login';
+            // Redirect to login if unauthorized
+            auth.signOut().then(() => {
+                window.location.href = '/login';
+            });
         }
         return Promise.reject(error);
     }
@@ -122,4 +125,5 @@ export const adminAPI = {
     activateDoctor: (id: number) => api.put(`/admin/doctors/${id}/activate`),
     getPatients: () => api.get('/admin/patients'),
     getUsers: (role?: string) => api.get('/admin/users', { params: { role } }),
+    getStats: () => api.get('/admin/stats'),
 };

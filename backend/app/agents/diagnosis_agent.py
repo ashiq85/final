@@ -1,9 +1,9 @@
 try:
-    from crewai import Agent
+    from crewai import Agent, Task, Crew
     CREWAI_AVAILABLE = True
 except ImportError:
     CREWAI_AVAILABLE = False
-    Agent = None
+    Agent = Task = Crew = None
 
 from app.agents.tools import search_similar_cases, query_medical_records, create_alert_tool, emergency_detection_tool, query_health_metrics
 from app.core.config import settings
@@ -44,16 +44,9 @@ diagnosis_agent = None
 
 def analyze_symptoms(patient_id: int, symptoms: list, vitals: dict = None) -> dict:
     """
-    Analyze patient symptoms and provide diagnosis suggestions.
-    
-    Args:
-        patient_id: Patient ID
-        symptoms: List of symptoms
-        vitals: Optional vital signs
-    
-    Returns:
-        Diagnosis analysis with suggestions and risk assessment
+    Analyze patient symptoms and provide diagnosis suggestions using CrewAI.
     """
+    import json
     try:
         logger.info(f"Analyzing symptoms for patient {patient_id}")
         
@@ -104,6 +97,37 @@ def analyze_symptoms(patient_id: int, symptoms: list, vitals: dict = None) -> di
                 )
         elif len(symptoms) > 5:
             risk_level = "MEDIUM"
+
+        diagnosis_result = {}
+        agent = get_diagnosis_agent()
+        if agent:
+            context = f"Patient {patient_id} has symptoms: {', '.join(symptoms)}. Vitals: {vitals}. Medical History: {medical_records}. Recent Health Metrics: {health_metrics}. Similar past cases: {similar_cases}."
+            task = Task(
+                description=f"Analyze the following patient data and provide highly specific, evidence-based potential diagnoses and detailed, actionable clinical recommendations. Avoid generic advice (like 'consult a doctor' or 'monitor symptoms'). Provide specific medical conditions (with likelihood/reasoning), potential differential diagnoses, and precise clinical next steps (e.g., specific lab tests, imaging, specialist referrals, or immediate interventions to consider). Patient Context: {context}. You must return a valid JSON object with EXACTLY the following format:\n{{\n  \"potential_diagnosis\": [\"Specific Condition 1 (Reasoning/Likelihood)\", \"Specific Condition 2\"],\n  \"recommendations\": [\"Specific Clinical Action 1 (e.g., specific labs/imaging)\", \"Specific Clinical Action 2\"],\n  \"risk_level\": \"LOW\" or \"MEDIUM\" or \"HIGH\" or \"CRITICAL\"\n}}\nDo not include any markdown fences (like ```json), just the raw JSON object.",
+                expected_output="A JSON object containing specific potential_diagnosis list, specific recommendations list, and risk_level string.",
+                agent=agent
+            )
+            crew = Crew(agents=[agent], tasks=[task], verbose=True)
+            crew_output = crew.kickoff()
+            
+            # Try to parse the crew output
+            out_str = str(crew_output).strip()
+            if out_str.startswith("```json"):
+                out_str = out_str[7:]
+            if out_str.startswith("```"):
+                out_str = out_str[3:]
+            if out_str.endswith("```"):
+                out_str = out_str[:-3]
+                
+            try:
+                parsed = json.loads(out_str.strip())
+                diagnosis_result = parsed
+            except Exception as e:
+                logger.error(f"Failed to parse AI output: {e}. Output was: {out_str}")
+
+        final_risk = diagnosis_result.get("risk_level", risk_level)
+        if risk_level == "CRITICAL":
+            final_risk = "CRITICAL"
         
         return {
             "patient_id": patient_id,
@@ -112,12 +136,13 @@ def analyze_symptoms(patient_id: int, symptoms: list, vitals: dict = None) -> di
             "health_metrics": health_metrics,
             "emergency_status": emergency_result,
             "similar_cases": similar_cases,
-            "risk_level": risk_level,
-            "recommendations": [
+            "risk_level": final_risk,
+            "potential_diagnosis": diagnosis_result.get("potential_diagnosis", []),
+            "recommendations": diagnosis_result.get("recommendations", [
                 "Consult with healthcare provider",
                 "Monitor symptoms closely",
                 "Seek immediate care if symptoms worsen"
-            ] if risk_level != "CRITICAL" else emergency_result["emergency_actions"]
+            ]) if final_risk != "CRITICAL" else emergency_result.get("emergency_actions", [])
         }
     
     except Exception as e:
