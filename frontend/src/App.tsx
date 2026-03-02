@@ -11,6 +11,8 @@ import ClinicalSupport from './pages/ClinicalSupport';
 import Alerts from './pages/Alerts';
 import Reports from './pages/Reports';
 import PatientManagement from './pages/PatientManagement';
+import AdminPage from './pages/AdminPage';
+import DoctorPatientView from './pages/DoctorPatientView';
 
 const queryClient = new QueryClient();
 
@@ -91,6 +93,27 @@ const AppRoutes: React.FC = () => {
           <ProtectedRoute>
             <Layout>
               <Reports />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <AdminPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/doctor/patients"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <DoctorPatientView />
             </Layout>
           </ProtectedRoute>
         }

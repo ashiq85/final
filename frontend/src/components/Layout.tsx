@@ -16,16 +16,29 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { user, logout } = useAuth();
     const location = useLocation();
 
-    const navigation = [
-        { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-        ...(user?.role === 'admin' || user?.role === 'doctor'
-            ? [{ name: 'Patients', href: '/patients', icon: Users }]
-            : []),
-        { name: 'Appointments', href: '/appointments', icon: Calendar },
-        { name: 'Clinical Support', href: '/clinical-support', icon: Activity },
-        { name: 'Alerts', href: '/alerts', icon: Bell },
-        { name: 'Health Reports', href: '/reports', icon: Heart },
-    ];
+    const navigation = (() => {
+        if (user?.role === 'admin') {
+            return [
+                { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+                { name: 'Admin Panel', href: '/admin', icon: Users },
+            ];
+        }
+        if (user?.role === 'doctor') {
+            return [
+                { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+                { name: 'Patient Records', href: '/doctor/patients', icon: Users },
+                { name: 'Appointments', href: '/appointments', icon: Calendar },
+            ];
+        }
+        // Patient
+        return [
+            { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+            { name: 'Appointments', href: '/appointments', icon: Calendar },
+            { name: 'Clinical Support', href: '/clinical-support', icon: Activity },
+            { name: 'Alerts', href: '/alerts', icon: Bell },
+            { name: 'Health Reports', href: '/reports', icon: Heart },
+        ];
+    })();
 
     return (
         <div className="min-h-screen bg-gray-50 flex">

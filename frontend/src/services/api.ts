@@ -61,16 +61,16 @@ export const patientsAPI = {
 // Appointments API
 export const appointmentsAPI = {
     getAll: (params?: any) => api.get<Appointment[]>('/appointments/', { params }),
-    getById: (id: number) => api.get<Appointment>(`/appointments/${id}`),
+    getById: (id: string) => api.get<Appointment>(`/appointments/${id}`),
     create: (data: any) => api.post<Appointment>('/appointments/', data),
-    update: (id: number, data: any) => api.put<Appointment>(`/appointments/${id}`, data),
-    cancel: (id: number) => api.delete(`/appointments/${id}`),
+    update: (id: string, data: any) => api.put<Appointment>(`/appointments/${id}`, data),
+    cancel: (id: string) => api.delete(`/appointments/${id}`),
     getDoctors: () => api.get<any[]>('/appointments/doctors'),
-    requestReschedule: (id: number, requested_new_date: string) =>
+    requestReschedule: (id: string, requested_new_date: string) =>
         api.post<Appointment>(`/appointments/${id}/request-reschedule`, { requested_new_date }),
-    approveReschedule: (id: number) =>
+    approveReschedule: (id: string) =>
         api.post<Appointment>(`/appointments/${id}/approve-reschedule`),
-    rejectReschedule: (id: number) =>
+    rejectReschedule: (id: string) =>
         api.post<Appointment>(`/appointments/${id}/reject-reschedule`),
 };
 
@@ -78,8 +78,8 @@ export const appointmentsAPI = {
 export const alertsAPI = {
     getAll: (params?: any) => api.get('/alerts/', { params }),
     getActive: () => api.get('/alerts/', { params: { is_resolved: false } }),
-    getById: (id: number) => api.get(`/alerts/${id}`),
-    resolve: (id: number) => api.put(`/alerts/${id}/resolve`),
+    getById: (id: string) => api.get(`/alerts/${id}`),
+    resolve: (id: string) => api.put(`/alerts/${id}/resolve`),
     triggerEmergency: (data: any) => api.post('/alerts/emergency', data),
 };
 
@@ -100,13 +100,13 @@ export const documentsAPI = {
             headers: { 'Content-Type': 'multipart/form-data' }
         });
     },
-    delete: (id: number) => api.delete(`/documents/${id}`),
+    delete: (id: string) => api.delete(`/documents/${id}`),
 };
 
 // Reports API
 export const reportsAPI = {
-    get: (patientId: number) => api.get(`/reports/patient/${patientId}`),
-    downloadPDF: (patientId: number) =>
+    get: (patientId: string) => api.get(`/reports/patient/${patientId}`),
+    downloadPDF: (patientId: string) =>
         api.get(`/reports/patient/${patientId}/download`, { responseType: 'blob' })
             .then(response => {
                 const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -122,8 +122,8 @@ export const reportsAPI = {
 export const adminAPI = {
     getDoctors: () => api.get('/admin/doctors'),
     createDoctor: (data: any) => api.post('/admin/doctors', data),
-    deactivateDoctor: (id: number) => api.put(`/admin/doctors/${id}/deactivate`),
-    activateDoctor: (id: number) => api.put(`/admin/doctors/${id}/activate`),
+    deactivateDoctor: (id: string) => api.put(`/admin/doctors/${id}/deactivate`),
+    activateDoctor: (id: string) => api.put(`/admin/doctors/${id}/activate`),
     getPatients: () => api.get('/admin/patients'),
     getUsers: (role?: string) => api.get('/admin/users', { params: { role } }),
     getStats: () => api.get('/admin/stats'),

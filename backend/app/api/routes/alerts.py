@@ -91,13 +91,25 @@ def get_alerts(
             return []
         query = query.where("patient_id", "==", patient_doc.id)
 
-    docs = query.limit(limit).stream()
-    results = []
-    for doc in docs:
-        data = doc.to_dict()
-        data['id'] = doc.id
-        results.append(data)
-    return results
+    try:
+        from firebase_admin import firestore
+        q = query.order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit + skip)
+        docs = q.stream()
+        results = []
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            results.append(data)
+        return results[skip:skip+limit]
+    except Exception as e:
+        docs = query.stream()
+        results = []
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            results.append(data)
+        results.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+        return results[skip : skip + limit]
 
 
 @router.get("/{alert_id}", response_model=dict)

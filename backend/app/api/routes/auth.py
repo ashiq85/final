@@ -45,8 +45,8 @@ async def get_current_user(
     )
     
     try:
-        # Verify the Firebase ID token
-        payload = firebase_auth.verify_id_token(token)
+        # Verify the Firebase ID token with clock skew tolerance
+        payload = firebase_auth.verify_id_token(token, clock_skew_seconds=60)
     except Exception as e:
         logger.error(f"Error validating Firebase token: {e}")
         raise credentials_exception
@@ -85,6 +85,71 @@ def require_role(*allowed_roles: UserRole):
     return decorator
 
 
+@router.post("/migrate-legacy", status_code=status.HTTP_200_OK)
+async def migrate_legacy_user(
+    credentials: UserCreate,
+    db: Any = Depends(get_db)
+):
+    """Migrate legacy users from Firestore to Firebase Auth"""
+    # 1. Retrieve the user from Firestore
+    docs = list(db.collection("users").where("email", "==", credentials.email).limit(1).stream())
+    if not docs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Legacy user not found. Please sign up."
+        )
+    
+    user_doc = docs[0]
+    user_data = user_doc.to_dict()
+    
+    # 2. Verify their legacy password
+    if not verify_password(credentials.password, user_data.get("hashed_password", "")):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
+        
+    # 3. Create or update them in Firebase Auth
+    try:
+        try:
+            firebase_user = firebase_auth.get_user_by_email(credentials.email)
+            firebase_auth.update_user(
+                firebase_user.uid,
+                password=credentials.password
+            )
+            firebase_uid = firebase_user.uid
+        except firebase_auth.UserNotFoundError:
+            firebase_user = firebase_auth.create_user(
+                email=credentials.email,
+                password=credentials.password,
+                display_name=user_data.get("full_name", "User")
+            )
+            firebase_uid = firebase_user.uid
+            
+        # 4. If the old Firestore document ID doesn't match the new Firebase UID,
+        # we need to migrate the user document over
+        if user_doc.id != firebase_uid:
+            new_user_ref = db.collection("users").document(firebase_uid)
+            new_user_ref.set(user_data)
+            
+            # Find and update the patient document linked to this user
+            pat_docs = db.collection("patients").where("user_id", "==", user_doc.id).stream()
+            for p_doc in pat_docs:
+                db.collection("patients").document(p_doc.id).update({"user_id": firebase_uid})
+                
+            # Optional: Delete the old user doc if we want a clean migration
+            # db.collection("users").document(user_doc.id).delete()
+            
+        return {"status": "success", "message": "Legacy user successfully migrated to Firebase."}
+            
+    except Exception as e:
+        logger.error(f"Failed to migrate legacy user to Firebase: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Migration failed: {str(e)}"
+        )
+
+
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def signup(
     user_data: UserCreate,
@@ -110,6 +175,12 @@ async def signup(
     try:
         try:
             firebase_user = firebase_auth.get_user_by_email(user_data.email)
+            # Update password to sync it, just in case they existed in Firebase but not in our DB
+            firebase_auth.update_user(
+                firebase_user.uid,
+                password=user_data.password,
+                display_name=user_data.full_name
+            )
             firebase_uid = firebase_user.uid
         except firebase_auth.UserNotFoundError:
             firebase_user = firebase_auth.create_user(
@@ -156,7 +227,6 @@ async def signup(
         # but we could use a write batch. For now keep simple.
     
     return new_user
-
 
 # Login endpoint removed. Authentication is now handled by the Firebase JS SDK on the frontend,
 # which provides an ID token that is verified by `get_current_user`.

@@ -13,7 +13,7 @@ import {
     PlusCircle,
     Heart
 } from 'lucide-react';
-import { alertsAPI, appointmentsAPI, adminAPI, patientsAPI } from '../services/api';
+import { alertsAPI, appointmentsAPI, adminAPI, patientsAPI, diagnosisAPI } from '../services/api';
 import api from '../services/api';
 import type { Alert, Appointment } from '../types';
 import clsx from 'clsx';
@@ -39,51 +39,104 @@ const Dashboard: React.FC = () => {
     const [formError, setFormError] = useState('');
     const [formSuccess, setFormSuccess] = useState('');
 
-    useEffect(() => {
-        if (!user) return;
-        const loadData = async () => {
-            try {
-                const [alertsRes, aptsRes] = await Promise.all([
-                    alertsAPI.getActive(),
-                    appointmentsAPI.getAll({ limit: 5 })
-                ]);
-                setAlerts(alertsRes.data);
-                setAppointments(aptsRes.data);
+    const [isLoading, setIsLoading] = useState({ alerts: false, appointments: false, profile: false, stats: false });
 
-                if (user.role === 'admin' || user.role === 'doctor') {
-                    const statsRes = await adminAPI.getStats();
-                    setStats(statsRes.data);
+    const loadData = async () => {
+        if (!user) return;
+
+        // Alerts
+        setIsLoading(prev => ({ ...prev, alerts: true }));
+        try {
+            const alertsRes = await alertsAPI.getActive();
+            setAlerts(alertsRes.data);
+        } catch (error) {
+            console.error('Loader: Alerts failed', error);
+        } finally {
+            setIsLoading(prev => ({ ...prev, alerts: false }));
+        }
+
+        // Appointments
+        setIsLoading(prev => ({ ...prev, appointments: true }));
+        let fetchedAppointments: Appointment[] = [];
+        try {
+            const aptsRes = await appointmentsAPI.getAll({ limit: 10 });
+            fetchedAppointments = aptsRes.data;
+            setAppointments(fetchedAppointments);
+
+            // Sync upcoming visit
+            const now = new Date();
+            const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
+            const relevant = fetchedAppointments
+                .filter(a => {
+                    const aptDate = new Date(a.appointment_date);
+                    return aptDate > fourHoursAgo && a.status === 'scheduled';
+                })
+                .sort((a, b) => new Date(a.appointment_date).getTime() - new Date(b.appointment_date).getTime());
+
+            setUpcomingAppointment(relevant.length > 0 ? relevant[0] : null);
+        } catch (error) {
+            console.error('Loader: Appointments failed', error);
+        } finally {
+            setIsLoading(prev => ({ ...prev, appointments: false }));
+        }
+
+        // Stats
+        if (user.role === 'admin' || user.role === 'doctor') {
+            setIsLoading(prev => ({ ...prev, stats: true }));
+            try {
+                const statsRes = await adminAPI.getStats();
+                setStats(statsRes.data);
+            } catch (error) {
+                console.error('Loader: Stats failed', error);
+            } finally {
+                setIsLoading(prev => ({ ...prev, stats: false }));
+            }
+        }
+
+        // Patient profile & dependent data
+        if (user.role === 'patient') {
+            setIsLoading(prev => ({ ...prev, profile: true }));
+            try {
+                const profileRes = await patientsAPI.getMyProfile();
+                const profileData = profileRes.data;
+                setPatientProfile(profileData);
+
+                // Load metrics
+                try {
+                    const metricsRes = await patientsAPI.getHealthMetrics(profileData.id);
+                    setHealthMetrics(metricsRes.data);
+                } catch (error) {
+                    console.error('Loader: Metrics failed', error);
                 }
 
-                if (user.role === 'patient') {
-                    const profileRes = await api.get('/patients/me');
-                    setPatientProfile(profileRes.data);
-                    const metricsRes = await api.get(`/patients/${profileRes.data.id}/health-metrics`);
-                    setHealthMetrics(metricsRes.data);
-
-                    // Get AI diagnosis based on current metrics
-                    const diagRes = await api.post('/diagnosis/analyze', {
-                        symptoms: [],
-                        patient_id: profileRes.data.id
-                    });
+                // Load AI diagnosis
+                try {
+                    const diagRes = await diagnosisAPI.analyze([], profileData.id);
                     setDiagnosis(diagRes.data);
-                    // Get real documents
-                    const docsRes = await api.get(`/documents/patient/${profileRes.data.id}`);
-                    setPatientDocuments(docsRes.data);
+                } catch (error) {
+                    console.error('Loader: Diagnosis failed', error);
+                }
 
-                    // Find next appointment
-                    if (aptsRes.data.length > 0) {
-                        const scheduled = aptsRes.data
-                            .filter(a => new Date(a.appointment_date) > new Date())
-                            .sort((a, b) => new Date(a.appointment_date).getTime() - new Date(b.appointment_date).getTime());
-                        if (scheduled.length > 0) setUpcomingAppointment(scheduled[0]);
-                    }
+                // Load documents
+                try {
+                    const docsRes = await api.get(`/documents/patient/${profileData.id}`);
+                    setPatientDocuments(docsRes.data);
+                } catch (error) {
+                    console.error('Loader: Documents failed', error);
                 }
             } catch (error) {
-                console.error('Error loading dashboard data:', error);
+                console.error('Loader: Profile failed', error);
+            } finally {
+                setIsLoading(prev => ({ ...prev, profile: false }));
             }
-        };
+        }
+    };
+
+    useEffect(() => {
         loadData();
+        // Dynamic dashboard: poll every 30 seconds
+        const interval = setInterval(loadData, 30000);
+        return () => clearInterval(interval);
     }, [user?.role]);
 
     const handleAddDoctor = async (e: React.FormEvent) => {
@@ -222,7 +275,12 @@ const Dashboard: React.FC = () => {
                 <div className="lg:col-span-1">
                     <DashboardCard title="Emergency Alerts" icon={AlertCircle} className="bg-red-50 border-red-100">
                         <div className="space-y-4">
-                            {alerts.length > 0 ? (
+                            {isLoading.alerts ? (
+                                <div className="flex justify-center flex-col items-center py-8">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500 mb-2"></div>
+                                    <p className="text-xs text-red-400 font-medium">Checking system alerts...</p>
+                                </div>
+                            ) : alerts.length > 0 ? (
                                 alerts.map(alert => (
                                     <div key={alert.id} className="p-3 bg-white border border-red-200 rounded-lg shadow-sm">
                                         <div className="flex items-start">
@@ -320,6 +378,29 @@ const Dashboard: React.FC = () => {
                                 )}
                             </div>
                         </DashboardCard>
+
+                        {alerts.length > 0 && (
+                            <DashboardCard title="Active Medical Alerts" icon={AlertCircle} className="bg-red-50 border-red-100">
+                                <div className="space-y-4">
+                                    {alerts.map(alert => (
+                                        <div key={alert.id} className="p-4 bg-white border border-red-200 rounded-xl shadow-sm">
+                                            <div className="flex items-start">
+                                                <AlertCircle className="h-6 w-6 text-red-500 mt-0.5 mr-3" />
+                                                <div className="flex-grow">
+                                                    <p className="text-sm font-bold text-gray-900">{alert.title}</p>
+                                                    <p className="text-xs text-red-600 mb-2 font-black uppercase tracking-widest">{alert.severity} SEVERITY</p>
+                                                    <p className="text-xs text-gray-600 mb-3">{alert.description}</p>
+                                                    <Link to="/alerts" className="text-xs font-bold text-red-700 bg-red-50 px-3 py-1.5 rounded-full border border-red-100 hover:bg-red-100 transition-colors inline-block">
+                                                        View Action Protocol
+                                                    </Link>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </DashboardCard>
+                        )}
+
                         <DashboardCard title="Recent Documents" icon={FileText} footer={
                             <Link to="/documents" className="text-sm font-medium text-primary-600 hover:text-primary-700">View all</Link>
                         }>
@@ -338,7 +419,12 @@ const Dashboard: React.FC = () => {
 
                 <div className="lg:col-span-1 space-y-6">
                     <DashboardCard title="Upcoming Visit" icon={Calendar} className="bg-primary-50">
-                        {upcomingAppointment ? (
+                        {isLoading.appointments ? (
+                            <div className="flex justify-center flex-col items-center py-10">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mb-2"></div>
+                                <p className="text-xs text-primary-400 font-medium">Syncing appointments...</p>
+                            </div>
+                        ) : upcomingAppointment ? (
                             <div className="text-center p-4">
                                 <div className="text-3xl font-bold text-primary-600 mb-1">
                                     {new Date(upcomingAppointment.appointment_date).getDate()}
@@ -346,11 +432,11 @@ const Dashboard: React.FC = () => {
                                 <div className="text-sm font-medium text-primary-500 uppercase tracking-wide">
                                     {new Date(upcomingAppointment.appointment_date).toLocaleString('default', { month: 'long' })}
                                 </div>
-                                <div className="mt-4 p-3 bg-white rounded-lg shadow-sm inline-block">
+                                <div className="mt-4 p-3 bg-white rounded-lg shadow-sm inline-block w-full">
                                     <p className="text-sm font-bold text-gray-900">
                                         {new Date(upcomingAppointment.appointment_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </p>
-                                    <p className="text-xs text-gray-500">{upcomingAppointment.reason}</p>
+                                    <p className="text-xs text-gray-500 line-clamp-2">{upcomingAppointment.reason}</p>
                                 </div>
                                 <div className="mt-6">
                                     <Link to="/appointments" className="btn-secondary w-full text-sm inline-block">Manage Visits</Link>

@@ -355,7 +355,6 @@ async def get_health_metrics(
     
     metrics_docs = db.collection("health_metrics")\
         .where("patient_id", "==", patient_id)\
-        .order_by("recorded_at", direction="DESCENDING")\
         .stream()
         
     results = []
@@ -363,6 +362,9 @@ async def get_health_metrics(
         data = doc.to_dict()
         data['id'] = doc.id
         results.append(HealthMetricResponse(**data))
+    
+    # Sort in-memory to avoid index requirement
+    results.sort(key=lambda x: str(x.recorded_at), reverse=True)
     return results
 
 
@@ -413,8 +415,6 @@ async def get_medical_records(
             
     docs = db.collection("medical_records")\
         .where("patient_id", "==", patient_id)\
-        .order_by("visit_date", direction="DESCENDING")\
-        .limit(50)\
         .stream()
         
     results = []
@@ -422,4 +422,7 @@ async def get_medical_records(
         data = doc.to_dict()
         data['id'] = doc.id
         results.append(data)
-    return results
+    
+    # Sort in-memory to avoid index requirement
+    results.sort(key=lambda x: str(x.get("visit_date", "")), reverse=True)
+    return results[:50]

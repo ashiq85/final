@@ -7,7 +7,7 @@ import type { Appointment } from '../types';
 import { AppointmentStatus } from '../types';
 
 interface Doctor {
-    id: number;
+    id: string;
     full_name: string;
     email: string;
 }
@@ -86,7 +86,7 @@ const Appointments: React.FC = () => {
         }
     };
 
-    const handleCancel = async (id: number) => {
+    const handleCancel = async (id: string) => {
         if (!window.confirm('Are you sure you want to cancel this appointment?')) return;
         try {
             await appointmentsAPI.cancel(id);
@@ -110,7 +110,7 @@ const Appointments: React.FC = () => {
         }
     };
 
-    const handleApprove = async (id: number) => {
+    const handleApprove = async (id: string) => {
         try {
             await appointmentsAPI.approveReschedule(id);
             loadAppointments();
@@ -119,7 +119,7 @@ const Appointments: React.FC = () => {
         }
     };
 
-    const handleReject = async (id: number) => {
+    const handleReject = async (id: string) => {
         try {
             await appointmentsAPI.rejectReschedule(id);
             loadAppointments();

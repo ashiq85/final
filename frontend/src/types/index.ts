@@ -6,7 +6,7 @@ export const UserRole = {
 export type UserRole = typeof UserRole[keyof typeof UserRole];
 
 export interface User {
-    id: number;
+    id: string;
     email: string;
     full_name: string;
     role: UserRole;
@@ -19,8 +19,8 @@ export interface AuthResponse {
 }
 
 export interface Patient {
-    id: number;
-    user_id: number;
+    id: string;
+    user_id: string;
     date_of_birth: string;
     gender: string;
     blood_type: string;
@@ -39,8 +39,8 @@ export interface Patient {
 }
 
 export interface HealthMetric {
-    id: number;
-    patient_id: number;
+    id: string;
+    patient_id: string;
     metric_name: string;
     value: number;
     unit?: string;
@@ -59,9 +59,9 @@ export const AppointmentStatus = {
 export type AppointmentStatus = typeof AppointmentStatus[keyof typeof AppointmentStatus];
 
 export interface Appointment {
-    id: number;
-    patient_id: number;
-    doctor_id: number;
+    id: string;
+    patient_id: string;
+    doctor_id: string;
     appointment_date: string;
     requested_new_date?: string;
     duration_minutes: number;
@@ -81,20 +81,20 @@ export const AlertSeverity = {
 export type AlertSeverity = typeof AlertSeverity[keyof typeof AlertSeverity];
 
 export interface Alert {
-    id: number;
-    patient_id: number;
+    id: string;
+    patient_id: string;
     severity: AlertSeverity;
     title: string;
     description: string;
     recommended_actions: string[];
     is_resolved: boolean;
-    create_at: string;
+    created_at: string;
     resolved_at?: string;
 }
 
 export interface Document {
-    id: number;
-    patient_id: number;
+    id: string;
+    patient_id: string;
     filename: string;
     file_type: string;
     document_type: string;
@@ -104,8 +104,8 @@ export interface Document {
 }
 
 export interface HealthReport {
-    id: number;
-    patient_id: number;
+    id: string;
+    patient_id: string;
     report_date: string;
     report_type: string;
     report_data: any;

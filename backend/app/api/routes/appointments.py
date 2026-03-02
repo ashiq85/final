@@ -242,22 +242,68 @@ async def get_appointments(
     query = db.collection("appointments")
 
     if current_user.role == UserRole.ADMIN:
-        docs = query.limit(limit).stream()
+        docs = query.stream()
     elif current_user.role == UserRole.DOCTOR:
-        docs = query.where("doctor_id", "==", current_user.id).limit(limit).stream()
+        docs = query.where("doctor_id", "==", current_user.id).stream()
     else:  # Patient
         p_docs = db.collection("patients").where("user_id", "==", current_user.id).limit(1).stream()
         patient_doc = None
         for d in p_docs: patient_doc = d
         if not patient_doc:
             return []
-        docs = query.where("patient_id", "==", patient_doc.id).limit(limit).stream()
+        docs = query.where("patient_id", "==", patient_doc.id).stream()
     
     results = []
-    for doc in docs:
-        results.append(_load_appointment_data(db, doc.id))
     
-    return [r for r in results if r is not None]
+    # In-memory caching for related entities to prevent N+1 queries
+    cache = {'doctors': {}, 'patients': {}, 'users': {}}
+    
+    def fetch_with_cache(doc):
+        app_data = doc.to_dict()
+        app_data['id'] = doc.id
+        
+        doc_id = app_data.get('doctor_id')
+        if doc_id and doc_id not in cache['doctors']:
+            doc_user = db.collection("users").document(doc_id).get()
+            if doc_user.exists:
+                u_data = doc_user.to_dict()
+                u_data['id'] = doc_user.id
+                cache['doctors'][doc_id] = u_data
+            else:
+                cache['doctors'][doc_id] = None
+        app_data['doctor'] = cache['doctors'].get(doc_id)
+            
+        pat_id = app_data.get('patient_id')
+        if pat_id and pat_id not in cache['patients']:
+            p_doc = db.collection("patients").document(pat_id).get()
+            if p_doc.exists:
+                p_data = p_doc.to_dict()
+                p_data['id'] = p_doc.id
+                p_user_id = p_data.get('user_id')
+                if p_user_id and p_user_id not in cache['users']:
+                    p_user = db.collection("users").document(p_user_id).get()
+                    if p_user.exists:
+                        pu_data = p_user.to_dict()
+                        pu_data['id'] = p_user.id
+                        cache['users'][p_user_id] = pu_data
+                    else:
+                        cache['users'][p_user_id] = None
+                p_data['user'] = cache['users'].get(p_user_id)
+                cache['patients'][pat_id] = p_data
+            else:
+                cache['patients'][pat_id] = None
+                
+        app_data['patient'] = cache['patients'].get(pat_id)
+        return app_data
+
+    for doc in docs:
+        results.append(fetch_with_cache(doc))
+    
+    # Sort in-memory to ensure most recent/relevant are included
+    valid_results = [r for r in results if r is not None]
+    valid_results.sort(key=lambda x: str(x.get("appointment_date", "")), reverse=True)
+    
+    return valid_results[skip : skip + limit]
 
 
 @router.get("/{appointment_id}", response_model=AppointmentResponse)

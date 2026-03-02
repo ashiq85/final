@@ -53,22 +53,24 @@ def query_medical_records(patient_id: str, limit: int = 10) -> List[Dict]:
         db = get_firestore_client()
         docs = db.collection("medical_records")\
             .where("patient_id", "==", patient_id)\
-            .order_by("visit_date", direction="DESCENDING")\
-            .limit(limit)\
             .stream()
 
-        return [
-            {
-                "visit_date": str(d.to_dict().get("visit_date")),
-                "chief_complaint": d.to_dict().get("chief_complaint"),
-                "symptoms": d.to_dict().get("symptoms") or [],
-                "vitals": d.to_dict().get("vitals") or {},
-                "diagnosis": d.to_dict().get("diagnosis"),
-                "treatment_plan": d.to_dict().get("treatment_plan"),
-                "prescriptions": d.to_dict().get("prescriptions") or []
-            }
-            for d in docs
-        ]
+        records = []
+        for d in docs:
+            data = d.to_dict()
+            records.append({
+                "visit_date": str(data.get("visit_date")),
+                "chief_complaint": data.get("chief_complaint"),
+                "symptoms": data.get("symptoms") or [],
+                "vitals": data.get("vitals") or {},
+                "diagnosis": data.get("diagnosis"),
+                "treatment_plan": data.get("treatment_plan"),
+                "prescriptions": data.get("prescriptions") or []
+            })
+        
+        # Sort in-memory to avoid index requirement
+        records.sort(key=lambda x: x["visit_date"], reverse=True)
+        return records[:limit]
     except Exception as e:
         logger.error(f"Error querying medical records: {e}")
         return []
@@ -219,20 +221,22 @@ def query_health_metrics(patient_id: str, limit: int = 10) -> List[Dict]:
         db = get_firestore_client()
         docs = db.collection("health_metrics")\
             .where("patient_id", "==", patient_id)\
-            .order_by("recorded_at", direction="DESCENDING")\
-            .limit(limit)\
             .stream()
 
-        return [
-            {
-                "recorded_at": str(d.to_dict().get("recorded_at")),
-                "metric_name": d.to_dict().get("metric_name"),
-                "value": d.to_dict().get("value"),
-                "unit": d.to_dict().get("unit"),
-                "notes": d.to_dict().get("notes")
-            }
-            for d in docs
-        ]
+        metrics = []
+        for d in docs:
+            data = d.to_dict()
+            metrics.append({
+                "recorded_at": str(data.get("recorded_at")),
+                "metric_name": data.get("metric_name"),
+                "value": data.get("value"),
+                "unit": data.get("unit"),
+                "notes": data.get("notes")
+            })
+        
+        # Sort in-memory to avoid index requirement
+        metrics.sort(key=lambda x: x["recorded_at"], reverse=True)
+        return metrics[:limit]
     except Exception as e:
         logger.error(f"Error querying health metrics: {e}")
         return []

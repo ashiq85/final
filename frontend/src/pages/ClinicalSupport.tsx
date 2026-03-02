@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { diagnosisAPI } from '../services/api';
-import { Activity, AlertTriangle, CheckCircle, Info, Brain, FlaskConical, Stethoscope } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle, Info, Brain, FlaskConical, Stethoscope, Calendar } from 'lucide-react';
 
 const ClinicalSupport: React.FC<{ patientId?: string }> = ({ patientId }) => {
     const [symptoms, setSymptoms] = useState('');

@@ -54,21 +54,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const login = async (credentials: any) => {
-        // Log in via Firebase
-        await signInWithEmailAndPassword(auth, credentials.email, credentials.password);
-        // onAuthStateChanged will handle fetching the user role and setting state
+        try {
+            await signInWithEmailAndPassword(auth, credentials.email, credentials.password);
+        } catch (error: any) {
+            console.error('Firebase login error:', error);
+            // If the user isn't in Firebase but has a legacy account, Firebase throws invalid-credential
+            if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+                try {
+                    console.log('Attempting legacy migration...');
+                    // Try the migrate endpoint
+                    await api.post('/auth/migrate-legacy', credentials);
+                    // If successful, try Firebase login again!
+                    await signInWithEmailAndPassword(auth, credentials.email, credentials.password);
+                    return; // Login succeeded after migration
+                } catch (migrationError: any) {
+                    console.error('Legacy migration failed:', migrationError);
+                    // Throw the original or meaningful error to the UI
+                    if (migrationError.response && migrationError.response.status === 401) {
+                        throw new Error("Invalid password");
+                    }
+                    if (migrationError.response && migrationError.response.status === 404) {
+                        throw new Error("User not found. Please sign up.");
+                    }
+                    throw error;
+                }
+            }
+            throw error;
+        }
     };
 
     const register = async (userData: any) => {
-        // Note: For custom claims/roles, the backend /auth/signup still needs to be called to save to Firestore.
-        // We do this via authService, which calls the backend. 
-        // The backend signup endpoint we modified ALREADY creates the Firebase Auth user!
+        try {
+            // Call the backend to create the user in Firebase Auth and Firestore
+            await api.post('/auth/signup', userData);
 
-        // So we just call the API. It will create the auth user and the firestore doc.
-        await api.post('/auth/signup', userData);
-
-        // Then we log in via Firebase client SDK to establish the session.
-        await signInWithEmailAndPassword(auth, userData.email, userData.password);
+            // Log in via Firebase to establish the local session
+            await signInWithEmailAndPassword(auth, userData.email, userData.password);
+        } catch (error: any) {
+            console.error('Registration/Login error:', error);
+            throw error;
+        }
     };
 
     return (
