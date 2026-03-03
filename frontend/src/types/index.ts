@@ -86,10 +86,13 @@ export interface Alert {
     severity: AlertSeverity;
     title: string;
     description: string;
+    symptoms?: string[];
+    potential_diagnoses?: string[];
     recommended_actions: string[];
     is_resolved: boolean;
     created_at: string;
     resolved_at?: string;
+    auto_booked_appointment_id?: string;
 }
 
 export interface Document {

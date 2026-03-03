@@ -28,6 +28,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
                 { name: 'Patient Records', href: '/doctor/patients', icon: Users },
                 { name: 'Appointments', href: '/appointments', icon: Calendar },
+                { name: 'Alerts', href: '/alerts', icon: Bell },
             ];
         }
         // Patient

@@ -55,7 +55,7 @@ const Alerts: React.FC = () => {
         }
     };
 
-    const handleResolve = async (id: number) => {
+    const handleResolve = async (id: string) => {
         try {
             await alertsAPI.resolve(id);
             loadAlerts();
@@ -156,8 +156,8 @@ const Alerts: React.FC = () => {
                         key={tab.key}
                         onClick={() => setActiveTab(tab.key)}
                         className={`flex items-center flex-1 justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${activeTab === tab.key
-                                ? 'bg-white shadow-sm text-primary-700'
-                                : 'text-gray-500 hover:text-gray-700'
+                            ? 'bg-white shadow-sm text-primary-700'
+                            : 'text-gray-500 hover:text-gray-700'
                             }`}
                     >
                         {tab.icon}
@@ -209,11 +209,7 @@ const Alerts: React.FC = () => {
                                         <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest ${severityBadge[sev] || 'bg-gray-500 text-white'}`}>
                                             {alert.severity}
                                         </span>
-                                        {isClinical(alert) && (
-                                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest bg-purple-100 text-purple-700 flex items-center gap-1">
-                                                <Brain className="h-2.5 w-2.5" /> AI Analysis
-                                            </span>
-                                        )}
+
                                         {isEmergency(alert) && (
                                             <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest bg-red-100 text-red-700 flex items-center gap-1">
                                                 <ShieldAlert className="h-2.5 w-2.5" /> Emergency
@@ -227,6 +223,36 @@ const Alerts: React.FC = () => {
                                         <h3 className="text-base font-black text-gray-900 uppercase tracking-tight">{alert.title}</h3>
                                     </div>
                                     <p className="text-gray-700 font-medium mb-4">{alert.description}</p>
+
+                                    {/* Structured Clinical Data */}
+                                    {(alert.symptoms?.length || alert.potential_diagnoses?.length) ? (
+                                        <div className="mb-4 space-y-3">
+                                            {alert.symptoms && alert.symptoms.length > 0 && (
+                                                <div>
+                                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Reported Symptoms</p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {alert.symptoms.map((sym, idx) => (
+                                                            <span key={idx} className="bg-red-50 text-red-700 px-2 py-1 rounded border border-red-100 text-xs font-semibold">
+                                                                {sym}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {alert.potential_diagnoses && alert.potential_diagnoses.length > 0 && (
+                                                <div>
+                                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">AI Potential Diagnoses</p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {alert.potential_diagnoses.map((diag, idx) => (
+                                                            <span key={idx} className="bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-100 text-xs font-semibold">
+                                                                {diag}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : null}
 
                                     {alert.recommended_actions && alert.recommended_actions.length > 0 && (
                                         <div className="bg-white/60 p-4 rounded-xl border border-gray-100 mb-4">

@@ -48,13 +48,14 @@ _SYMPTOM_KB = [
         ],
     },
     {
-        "keywords": ["fever", "temperature", "chills", "sweating", "sweat"],
-        "conditions": ["Viral Infection", "Bacterial Infection", "Influenza"],
+        "keywords": ["fever", "temperature", "chills", "sweating", "sweat", "flu", "cold", "body ache"],
+        "conditions": ["Viral Infection", "Bacterial Infection", "Influenza", "Common Cold"],
         "actions": [
             "Rest and stay well hydrated",
             "Take paracetamol/ibuprofen to reduce fever",
             "Monitor temperature every 4 hours",
             "Seek care if fever exceeds 39.5°C (103°F) or lasts more than 3 days",
+            "Isolation if contagious symptoms present"
         ],
     },
     {
@@ -129,19 +130,19 @@ _SYMPTOM_KB = [
         ],
     },
     {
-        "keywords": ["fatigue", "tired", "weakness", "lethargy", "exhaustion"],
-        "conditions": ["Iron Deficiency Anemia", "Hypothyroidism", "Chronic Fatigue Syndrome"],
+        "keywords": ["fatigue", "tired", "weakness", "lethargy", "exhaustion", "sleepy", "low energy"],
+        "conditions": ["Iron Deficiency Anemia", "Hypothyroidism", "Chronic Fatigue Syndrome", "Dehydration"],
         "actions": [
             "Ensure adequate sleep hygiene (7-9 hours per night)",
             "Maintain a balanced diet rich in iron and vitamins",
-            "Stay hydrated",
+            "Stay hydrated (2-3 liters of water daily)",
             "Schedule a blood panel including CBC, thyroid function and iron studies",
         ],
     },
 ]
 
 
-def _local_symptom_lookup(symptoms: list) -> dict:
+def local_symptom_lookup(symptoms: list) -> dict:
     """Match symptoms against the local knowledge base and return conditions + recommendations."""
     combined = " ".join(symptoms).lower()
     matched_conditions = []
@@ -321,7 +322,7 @@ Respond ONLY with a valid JSON object in exactly this format (no markdown, no ex
                 raise inner_err
         except Exception as llm_err:
             logger.warning(f"LLM diagnosis failed, using local fallback: {type(llm_err).__name__}")
-            llm_result = _local_symptom_lookup(symptoms)
+            llm_result = local_symptom_lookup(symptoms)
         
         final_risk = llm_result.get("risk_level", risk_level)
         if risk_level == "CRITICAL":

@@ -4,7 +4,7 @@ from app.db.base import get_db
 from app.db.models import User, Patient, HealthMetric, UserRole, Alert, AlertSeverity, AppointmentStatus
 from app.api.routes.auth import get_current_user
 from app.schemas import SymptomAnalysisRequest, DiagnosisResponse, EmergencyAssessment
-from app.agents.diagnosis_agent import analyze_symptoms as analyze_with_agent
+from app.agents.diagnosis_agent import analyze_symptoms as analyze_with_agent, local_symptom_lookup
 import logging
 
 logger = logging.getLogger(__name__)
@@ -164,15 +164,51 @@ def _run_diagnosis_background_task(
         db.collection("medical_records").document().set(record_data)
         
         if risk_level in ["HIGH", "CRITICAL"]:
+            # Comprehensive disease-to-specialization mapping
+            SPECIALIZATION_MAP = [
+                ("Cardiologist",     ["heart", "cardiac", "chest pain", "myocardial", "angina", "arrhythmia",
+                                      "palpitation", "coronary", "hypertension", "blood pressure"]),
+                ("Neurologist",      ["stroke", "neuro", "brain", "seizure", "epilepsy", "migraine", "headache",
+                                      "numbness", "tingling", "paralysis", "dementia", "alzheimer", "parkinson",
+                                      "neuropathy", "consciousness"]),
+                ("Pulmonologist",    ["lung", "breath", "asthma", "copd", "pneumonia", "respiratory",
+                                      "oxygen", "wheezing", "cough", "bronchitis", "pulmonary", "shortness of breath"]),
+                ("Gastroenterologist", ["stomach", "abdominal", "liver", "gastro", "intestine", "colon",
+                                        "nausea", "vomiting", "diarrhea", "constipation", "ulcer", "hepatitis",
+                                        "appendix", "pancreatitis", "bowel", "digestive"]),
+                ("Orthopedic",       ["bone", "joint", "fracture", "spine", "back pain", "knee", "shoulder",
+                                      "hip", "ligament", "tendon", "arthritis", "musculo", "orthopedic"]),
+                ("Dermatologist",    ["skin", "rash", "itching", "eczema", "psoriasis", "acne", "allergy",
+                                      "derma", "hives", "wound", "infection", "melanoma"]),
+                ("Endocrinologist",  ["diabetes", "thyroid", "hormone", "insulin", "blood sugar", "glucose",
+                                      "endocrine", "adrenal", "pituitary", "obesity", "weight gain"]),
+                ("Urologist",        ["kidney", "urine", "urinary", "bladder", "prostate", "renal",
+                                      "uti", "incontinence", "nephr", "stone"]),
+                ("Psychiatrist",     ["mental", "anxiety", "depression", "psychi", "panic", "stress",
+                                      "hallucination", "bipolar", "schizophrenia", "suicidal"]),
+                ("Gynecologist",     ["gynecol", "menstrual", "pregnancy", "uterus", "ovary", "pelvic",
+                                      "vaginal", "obstetric", "breast", "cervical"]),
+                ("Pediatrician",     ["child", "infant", "pediatric", "baby", "fever in child",
+                                      "vaccination", "newborn"]),
+                ("ENT Specialist",   ["ear", "nose", "throat", "sinus", "tonsil", "hearing", "ent",
+                                      "larynx", "nasal", "vertigo"]),
+                ("Ophthalmologist",  ["eye", "vision", "ophthal", "retina", "cataract", "glaucoma",
+                                      "sight", "cornea", "blind"]),
+                ("Oncologist",       ["cancer", "tumor", "oncol", "carcinoma", "malignant", "lymphoma",
+                                      "leukemia", "biopsy", "chemo", "metastasis"]),
+            ]
+
             specialization = "General Physician"
             sym_text = " ".join(symptoms).lower()
             diag_text = " ".join(potential_diagnosis).lower()
             combined = sym_text + " " + diag_text
-            
-            if any(w in combined for w in ["heart", "chest", "cardiac", "stroke"]):
-                specialization = "Cardiologist"
-            elif any(w in combined for w in ["neuro", "head", "brain"]):
-                specialization = "Neurologist"
+
+            for spec_name, keywords in SPECIALIZATION_MAP:
+                if any(kw in combined for kw in keywords):
+                    specialization = spec_name
+                    logger.info(f"Auto-booking specialization resolved: {specialization}")
+                    break
+
                 
             doctor_docs = db.collection("users").where("role", "==", UserRole.DOCTOR.value).where("is_active", "==", True).stream()
             target_doctor_id = None
@@ -193,7 +229,7 @@ def _run_diagnosis_background_task(
                 target_doctor_name = fallback_doctor_name
                 
             if target_doctor_id:
-                apt_date = datetime.utcnow() + timedelta(hours=1)
+                apt_date = datetime.utcnow() + timedelta(minutes=30)
                 
                 existing = db.collection("appointments").where("patient_id", "==", use_id).where("status", "==", "scheduled").stream()
                 already_booked = False
@@ -241,25 +277,29 @@ def _run_diagnosis_background_task(
                             if doc_doc.exists:
                                 booked_doctor_name = doc_doc.to_dict().get("full_name", "Specialist")
                             break
-
             # Create Alert document for HIGH or CRITICAL
             alert_severity = AlertSeverity.HIGH if risk_level == "HIGH" else AlertSeverity.CRITICAL
             new_alert = Alert(
                 patient_id=use_id,
                 severity=alert_severity,
                 title=f"Priority Medical Alert: {risk_level} Risk",
-                description=f"Symptoms: {', '.join(symptoms)}. Potential: {', '.join(potential_diagnosis[:2])}",
+                description="Our AI has detected potentially high-risk symptoms requiring immediate attention.",
+                symptoms=symptoms,
+                potential_diagnoses=potential_diagnosis[:2],
                 recommended_actions=recommendations[:3],
                 auto_booked_appointment_id=booked_appointment_id
             )
             db.collection("alerts").document().set(new_alert.to_firestore())
         else:
-            # Create a regular Alert for tracking the background task completion
+            # Create an Informational/Low severity alert for history/visibility
+            # Always ensure an alert is created for EVERY analysis
             new_alert = Alert(
                 patient_id=use_id,
-                severity=AlertSeverity.LOW if risk_level == "LOW" else AlertSeverity.MEDIUM,
-                title=f"Clinical Analysis Completed: {risk_level} Risk",
-                description=f"Symptoms: {', '.join(symptoms)}. Potential: {', '.join(potential_diagnosis[:2])}",
+                severity=AlertSeverity.LOW,
+                title="Clinical Analysis Complete",
+                description="Routine clinical analysis indicates non-emergency conditions.",
+                symptoms=symptoms,
+                potential_diagnoses=potential_diagnosis[:2],
                 recommended_actions=recommendations[:3],
                 auto_booked_appointment_id=None
             )
@@ -313,12 +353,15 @@ async def analyze_symptoms(
         notify_user_id=current_user.id
     )
 
-    # Return immediately
+    # Fast local analysis for immediate UI feedback
+    local_analysis = local_symptom_lookup(request.symptoms)
+    
+    # Return immediately with local findings
     return DiagnosisResponse(
-        potential_diagnosis=["Analysis in progress, please check alerts shortly."],
-        recommendations=["The AI is reviewing the symptoms."],
+        potential_diagnosis=local_analysis.get("potential_diagnosis", ["Analysis in progress..."]),
+        recommendations=local_analysis.get("recommendations", ["The AI is reviewing the symptoms."]),
         risk_level="PENDING",
-        emergency_assessment=None,
+        emergency_assessment=emergency if emergency.is_emergency else None,
         booked_appointment_id=None,
         booked_doctor_name=None
     )

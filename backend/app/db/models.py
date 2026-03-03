@@ -117,6 +117,8 @@ class Alert(FirestoreModel):
     severity: AlertSeverity
     title: str
     description: Optional[str] = None
+    symptoms: List[str] = []
+    potential_diagnoses: List[str] = []
     recommended_actions: List[str] = []
     is_resolved: bool = False
     auto_booked_appointment_id: Optional[str] = None

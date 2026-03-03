@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Navigate, Link } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import {
     Users,
     Calendar,
@@ -21,6 +21,7 @@ import { X } from 'lucide-react';
 
 const Dashboard: React.FC = () => {
     const { user } = useAuth();
+    const navigate = useNavigate();
     const [alerts, setAlerts] = useState<Alert[]>([]);
     const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [patientProfile, setPatientProfile] = useState<any>(null);
@@ -44,11 +45,11 @@ const Dashboard: React.FC = () => {
     const loadData = async () => {
         if (!user) return;
 
-        // Alerts
+        // Alerts - only for header badge, use cached light endpoint
         setIsLoading(prev => ({ ...prev, alerts: true }));
         try {
             const alertsRes = await alertsAPI.getActive();
-            setAlerts(alertsRes.data);
+            setAlerts(alertsRes.data.slice(0, 5)); // only load max 5 for dashboard
         } catch (error) {
             console.error('Loader: Alerts failed', error);
         } finally {
@@ -63,7 +64,7 @@ const Dashboard: React.FC = () => {
             fetchedAppointments = aptsRes.data;
             setAppointments(fetchedAppointments);
 
-            // Sync upcoming visit
+            // Sync upcoming visit — keep old value during reload to prevent flicker
             const now = new Date();
             const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
             const relevant = fetchedAppointments
@@ -109,14 +110,6 @@ const Dashboard: React.FC = () => {
                     console.error('Loader: Metrics failed', error);
                 }
 
-                // Load AI diagnosis
-                try {
-                    const diagRes = await diagnosisAPI.analyze([], profileData.id);
-                    setDiagnosis(diagRes.data);
-                } catch (error) {
-                    console.error('Loader: Diagnosis failed', error);
-                }
-
                 // Load documents
                 try {
                     const docsRes = await api.get(`/documents/patient/${profileData.id}`);
@@ -134,9 +127,7 @@ const Dashboard: React.FC = () => {
 
     useEffect(() => {
         loadData();
-        // Dynamic dashboard: poll every 30 seconds
-        const interval = setInterval(loadData, 30000);
-        return () => clearInterval(interval);
+        // No polling - avoid repeated heavy API calls
     }, [user?.role]);
 
     const handleAddDoctor = async (e: React.FormEvent) => {
@@ -177,14 +168,8 @@ const Dashboard: React.FC = () => {
             });
             setIsLogModalOpen(false);
             setNewMetric({ metric_name: 'blood_sugar_before', value: '', unit: 'mg/dL', notes: '' });
-            // Refresh metrics and diagnosis
-            const metricsRes = await api.get(`/patients/${patientProfile.id}/health-metrics`);
-            setHealthMetrics(metricsRes.data);
-            const diagRes = await api.post('/diagnosis/analyze', {
-                symptoms: [],
-                patient_id: patientProfile.id
-            });
-            setDiagnosis(diagRes.data);
+            // Redirect to reports page
+            navigate('/reports');
         } catch (error) {
             console.error('Error logging metric:', error);
         }

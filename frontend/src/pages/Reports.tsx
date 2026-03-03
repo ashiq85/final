@@ -1,28 +1,83 @@
-import React from 'react';
-import { reportsAPI } from '../services/api';
+import React, { useState, useEffect } from 'react';
+import { reportsAPI, patientsAPI } from '../services/api';
+import { format } from 'date-fns';
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
-import { Heart, Activity, FileText, Download, TrendingUp, Calendar, ChevronRight, CheckCircle } from 'lucide-react';
+import { Heart, Activity, FileText, Download, TrendingUp, Calendar, ChevronRight, CheckCircle, RefreshCw } from 'lucide-react';
 
 const Reports: React.FC = () => {
-    const handleDownload = async () => {
+    const [patient, setPatient] = useState<any>(null);
+    const [metrics, setMetrics] = useState<any[]>([]);
+    const [reports, setReports] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [trendData, setTrendData] = useState<any[]>([]);
+
+    useEffect(() => {
+        loadData();
+    }, []);
+
+    const loadData = async () => {
         try {
-            await reportsAPI.downloadPDF(1);
+            setLoading(true);
+            const profileRes = await patientsAPI.getMyProfile();
+            const p = profileRes.data;
+            setPatient(p);
+
+            const metricsRes = await patientsAPI.getHealthMetrics(p.id);
+            const mData = metricsRes.data || [];
+            setMetrics(mData);
+
+            const reportsRes = await reportsAPI.get(p.id);
+            setReports(reportsRes.data || []);
+
+            // Process metrics for chart (last 10 points)
+            const sorted = [...mData].sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
+            const chartPoints = sorted.slice(-10).map(m => ({
+                date: format(new Date(m.recorded_at), 'MMM d'),
+                value: m.value,
+                name: m.metric_name,
+                unit: m.unit
+            }));
+
+            // Re-group by date for better visualization if multiple metrics exist
+            const grouped = chartPoints.reduce((acc: any, curr: any) => {
+                if (!acc[curr.date]) acc[curr.date] = { date: curr.date };
+                if (curr.name.includes('heart')) acc[curr.date].heartRate = curr.value;
+                if (curr.name.includes('blood_sugar')) acc[curr.date].sugar = curr.value;
+                return acc;
+            }, {});
+
+            setTrendData(Object.values(grouped));
+
+        } catch (error) {
+            console.error('Error loading reports data:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDownload = async () => {
+        if (!patient) return;
+        try {
+            await reportsAPI.downloadPDF(patient.id);
         } catch (error) {
             console.error('Download error:', error);
         }
     };
 
-    // Mock data for trends visualization
-    const trendData = [
-        { date: 'Jan', heartRate: 72, bp: 120, oxygen: 98 },
-        { date: 'Feb', heartRate: 75, bp: 118, oxygen: 97 },
-        { date: 'Mar', heartRate: 70, bp: 122, oxygen: 99 },
-        { date: 'Apr', heartRate: 68, bp: 119, oxygen: 98 },
-        { date: 'May', heartRate: 74, bp: 121, oxygen: 98 },
-        { date: 'Jun', heartRate: 71, bp: 120, oxygen: 99 }
-    ];
+    if (loading) {
+        return (
+            <div className="flex flex-col items-center justify-center h-64 space-y-4">
+                <RefreshCw className="h-12 w-12 text-primary-500 animate-spin" />
+                <p className="text-gray-500 font-medium tracking-widest uppercase text-xs">Generating Your Clinical Analytics...</p>
+            </div>
+        );
+    }
+
+    const latestReport = reports.find(r => r.report_type === "AI Health Insight") || reports[0];
+
+
 
     return (
         <div className="space-y-6">
@@ -49,13 +104,15 @@ const Reports: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="card border-0 bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg overflow-hidden relative">
                     <div className="relative z-10">
-                        <p className="text-xs font-bold uppercase tracking-widest text-blue-100">Avg. Heart Rate</p>
+                        <p className="text-xs font-bold uppercase tracking-widest text-blue-100">Latest Heart Rate</p>
                         <div className="flex items-baseline mt-2">
-                            <p className="text-4xl font-black">72</p>
+                            <p className="text-4xl font-black">
+                                {metrics.find(m => m.metric_name.includes('heart'))?.value || '--'}
+                            </p>
                             <span className="ml-2 text-sm font-medium text-blue-100">BPM</span>
                         </div>
                         <div className="mt-4 flex items-center text-xs text-blue-100 font-bold">
-                            <TrendingUp className="h-3 w-3 mr-1" /> 2% decrease from last month
+                            <TrendingUp className="h-3 w-3 mr-1" /> Updated {metrics.find(m => m.metric_name.includes('heart')) ? format(new Date(metrics.find(m => m.metric_name.includes('heart')).recorded_at), 'MMM d') : 'recently'}
                         </div>
                     </div>
                     <Heart className="absolute -right-4 -bottom-4 h-32 w-32 text-white/10" />
@@ -63,13 +120,15 @@ const Reports: React.FC = () => {
 
                 <div className="card border-0 bg-gradient-to-br from-green-600 to-green-700 text-white shadow-lg overflow-hidden relative">
                     <div className="relative z-10">
-                        <p className="text-xs font-bold uppercase tracking-widest text-green-100">Blood Pressure</p>
+                        <p className="text-xs font-bold uppercase tracking-widest text-green-100">Latest Blood Sugar</p>
                         <div className="flex items-baseline mt-2">
-                            <p className="text-4xl font-black">120/80</p>
-                            <span className="ml-2 text-sm font-medium text-green-100">mmHg</span>
+                            <p className="text-4xl font-black">
+                                {metrics.find(m => m.metric_name.includes('sugar'))?.value || '--'}
+                            </p>
+                            <span className="ml-2 text-sm font-medium text-green-100">mg/dL</span>
                         </div>
                         <div className="mt-4 flex items-center text-xs text-green-100 font-bold">
-                            <CheckCircle className="h-3 w-3 mr-1" /> Optimal Range
+                            <CheckCircle className="h-3 w-3 mr-1" /> {metrics.find(m => m.metric_name.includes('sugar'))?.unit || 'Verified'}
                         </div>
                     </div>
                     <Activity className="absolute -right-4 -bottom-4 h-32 w-32 text-white/10" />
@@ -112,8 +171,8 @@ const Reports: React.FC = () => {
                                 <Tooltip
                                     contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                                 />
-                                <Area type="monotone" dataKey="heartRate" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorHr)" name="Heart Rate" />
-                                <Area type="monotone" dataKey="bp" stroke="#ef4444" strokeWidth={3} fillOpacity={0} name="Systolic BP" />
+                                <Area type="monotone" dataKey="heartRate" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorHr)" name="Heart Rate (BPM)" />
+                                <Area type="monotone" dataKey="sugar" stroke="#10b981" strokeWidth={3} fillOpacity={0.1} fill="#10b981" name="Blood Sugar (mg/dL)" />
                             </AreaChart>
                         </ResponsiveContainer>
                     </div>
@@ -121,33 +180,39 @@ const Reports: React.FC = () => {
 
                 <div className="card">
                     <div className="flex items-center justify-between mb-6">
-                        <h3 className="font-bold text-gray-900">Health Summary & Findings</h3>
+                        <h3 className="font-bold text-gray-900">Health Summary & AI Findings</h3>
                         <button className="text-xs font-bold text-primary-600 hover:text-primary-700 flex items-center uppercase tracking-widest">
-                            Full Analysis <ChevronRight className="h-3 w-3 ml-1" />
+                            Full History <ChevronRight className="h-3 w-3 ml-1" />
                         </button>
                     </div>
                     <div className="space-y-6">
-                        <div className="flex items-start">
-                            <div className="h-2 w-2 rounded-full bg-green-500 mt-2 mr-3 flex-shrink-0" />
-                            <div>
-                                <p className="text-sm font-bold text-gray-800">Cardiovascular Health</p>
-                                <p className="text-xs text-gray-500 mt-1 leading-relaxed">Vitals remain within optimal parameters. Stability in blood pressure noted over the last 90 days.</p>
+                        {latestReport ? (
+                            <>
+                                <div className="flex items-start">
+                                    <div className="h-2 w-2 rounded-full bg-primary-500 mt-2 mr-3 flex-shrink-0" />
+                                    <div>
+                                        <p className="text-sm font-bold text-gray-800">{latestReport.report_type}</p>
+                                        <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                                            {latestReport.report_data?.interpretation || "No interpretation available for this period."}
+                                        </p>
+                                    </div>
+                                </div>
+                                {latestReport.report_data?.recommendations?.map((rec: string, i: number) => (
+                                    <div key={i} className="flex items-start">
+                                        <div className="h-2 w-2 rounded-full bg-green-500 mt-2 mr-3 flex-shrink-0" />
+                                        <div>
+                                            <p className="text-sm font-bold text-gray-800">Recommendation {i + 1}</p>
+                                            <p className="text-xs text-gray-500 mt-1 leading-relaxed">{rec}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </>
+                        ) : (
+                            <div className="text-center py-10">
+                                <FileText className="h-12 w-12 text-gray-200 mx-auto mb-3" />
+                                <p className="text-sm text-gray-400">No AI health insights available yet. Log your vitals to trigger an analysis.</p>
                             </div>
-                        </div>
-                        <div className="flex items-start">
-                            <div className="h-2 w-2 rounded-full bg-blue-500 mt-2 mr-3 flex-shrink-0" />
-                            <div>
-                                <p className="text-sm font-bold text-gray-800">Respiratory Performance</p>
-                                <p className="text-xs text-gray-500 mt-1 leading-relaxed">Oxygen saturation is consistently at 98-99%. No significant anomalies detected during sleep patterns.</p>
-                            </div>
-                        </div>
-                        <div className="flex items-start">
-                            <div className="h-2 w-2 rounded-full bg-amber-500 mt-2 mr-3 flex-shrink-0" />
-                            <div>
-                                <p className="text-sm font-bold text-gray-800">Weight & Metabolic Profile</p>
-                                <p className="text-xs text-gray-500 mt-1 leading-relaxed">BMI is steady. Recommend continuing current activity levels with focus on cardiovascular endurance.</p>
-                            </div>
-                        </div>
+                        )}
                     </div>
                 </div>
             </div>

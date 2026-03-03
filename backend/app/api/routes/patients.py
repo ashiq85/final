@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from typing import List, Optional, Any, Dict
+from datetime import datetime
 from app.db.base import get_db
-from app.db.models import Patient, User, UserRole, HealthMetric
+from app.db.models import Patient, User, UserRole, HealthMetric, HealthReport
 from app.schemas import PatientCreate, PatientUpdate, PatientResponse, UserCreate, HealthMetricCreate, HealthMetricResponse
+from app.core.llm import get_llm
 from app.api.routes.auth import get_current_user
 from app.core.security import get_password_hash
 import random
@@ -372,6 +374,7 @@ async def get_health_metrics(
 async def log_health_metric(
     patient_id: str,
     metric_data: HealthMetricCreate,
+    background_tasks: BackgroundTasks,
     db: Any = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -395,7 +398,73 @@ async def log_health_metric(
     metric_ref.set(metric.to_firestore())
     metric.id = metric_ref.id
     
+    # Trigger background AI analysis
+    background_tasks.add_task(
+        _generate_health_analysis,
+        db=db,
+        patient_id=patient_id,
+        metric_name=metric.metric_name,
+        value=metric.value,
+        unit=metric.unit
+    )
+    
     return metric
+
+
+async def _generate_health_analysis(db: Any, patient_id: str, metric_name: str, value: float, unit: str):
+    """Generate AI analysis for a newly logged health metric"""
+    try:
+        # Fetch patient info for context
+        p_doc = db.collection("patients").document(patient_id).get()
+        p_data = p_doc.to_dict() if p_doc.exists else {}
+        
+        # Prepare prompt
+        prompt = f"""You are a clinical analyst. A patient has logged a new health metric.
+        Metric: {metric_name}
+        Value: {value} {unit}
+        Patient Context: {p_data.get('medical_history', 'No history available')}
+        
+        Provide a concise clinical interpretation (2-3 sentences) of this value.
+        Then provide 2-3 specific health recommendations.
+        
+        Respond with raw text in this format:
+        INTERPRETATION: [text]
+        RECOMMENDATIONS: [bullet points]
+        """
+        
+        llm = get_llm()
+        response = llm.invoke(prompt)
+        content = response.content.strip()
+        
+        # Parse or just store as dict
+        interpretation = "Analysis complete."
+        recommendations = []
+        
+        if "INTERPRETATION:" in content:
+            parts = content.split("RECOMMENDATIONS:")
+            interpretation = parts[0].replace("INTERPRETATION:", "").strip()
+            if len(parts) > 1:
+                recommendations = [r.strip("- ").strip() for r in parts[1].strip().split("\n") if r.strip()]
+
+        report = HealthReport(
+            patient_id=patient_id,
+            report_type="AI Health Insight",
+            report_data={
+                "metric": metric_name,
+                "value": value,
+                "unit": unit,
+                "interpretation": interpretation,
+                "recommendations": recommendations,
+                "timestamp": datetime.utcnow().isoformat()
+            },
+            created_at=datetime.utcnow()
+        )
+        
+        db.collection("health_reports").document().set(report.to_firestore())
+        logger.info(f"Generated health report for patient {patient_id}")
+        
+    except Exception as e:
+        logger.error(f"Failed to generate health analysis: {e}")
 
 
 @router.get("/{patient_id}/medical-records", response_model=List[Dict[str, Any]])

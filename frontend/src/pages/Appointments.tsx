@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { appointmentsAPI } from '../services/api';
 import { format } from 'date-fns';
-import { Calendar, Clock, Plus, X, User } from 'lucide-react';
+import { Calendar, Clock, Plus, X, User, Search, Stethoscope } from 'lucide-react';
 import type { Appointment } from '../types';
 import { AppointmentStatus } from '../types';
 
@@ -10,6 +10,7 @@ interface Doctor {
     id: string;
     full_name: string;
     email: string;
+    specialization?: string;
 }
 
 const Appointments: React.FC = () => {
@@ -20,12 +21,13 @@ const Appointments: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [bookingError, setBookingError] = useState('');
     const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
+    const [specializationFilter, setSpecializationFilter] = useState('');
+    const [doctorSearch, setDoctorSearch] = useState('');
     const [newAppointment, setNewAppointment] = useState({
-        doctor_id: 0,
+        doctor_id: '' as string | number,
         appointment_date: '',
         reason: '',
-        duration_minutes: 30,
-        patient_id: 0, // will be auto-set by backend for patients
+        patient_id: 0,
     });
 
     const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false);
@@ -53,19 +55,38 @@ const Appointments: React.FC = () => {
         try {
             const response = await appointmentsAPI.getDoctors();
             setDoctors(response.data);
-            if (response.data.length > 0) {
-                setNewAppointment(prev => ({ ...prev, doctor_id: response.data[0].id }));
-            }
         } catch (error) {
             console.error('Error loading doctors:', error);
         }
     };
 
+    // All unique specializations from the doctor list
+    const specializations = useMemo(() => {
+        const seen = new Set<string>();
+        doctors.forEach(d => {
+            const spec = d.specialization || 'General Physician';
+            seen.add(spec);
+        });
+        return ['All Specializations', ...Array.from(seen).sort()];
+    }, [doctors]);
+
+    // Filtered + searched doctors for the booking modal
+    const filteredDoctors = useMemo(() => {
+        return doctors.filter(d => {
+            const matchesSpec = !specializationFilter || specializationFilter === 'All Specializations'
+                || d.specialization?.toLowerCase() === specializationFilter.toLowerCase();
+            const matchesSearch = !doctorSearch
+                || d.full_name.toLowerCase().includes(doctorSearch.toLowerCase())
+                || (d.specialization || '').toLowerCase().includes(doctorSearch.toLowerCase());
+            return matchesSpec && matchesSearch;
+        });
+    }, [doctors, specializationFilter, doctorSearch]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setBookingError('');
-        if (!newAppointment.doctor_id) {
-            setBookingError('Please select a doctor.');
+        if (!newAppointment.doctor_id || newAppointment.doctor_id === '') {
+            setBookingError('Please select a doctor from the list below.');
             return;
         }
         try {
@@ -73,17 +94,28 @@ const Appointments: React.FC = () => {
                 doctor_id: newAppointment.doctor_id,
                 appointment_date: new Date(newAppointment.appointment_date).toISOString(),
                 reason: newAppointment.reason,
-                duration_minutes: newAppointment.duration_minutes,
-                patient_id: 0, // backend resolves this for patients
+                duration_minutes: 30, // Default to 30 minutes
+                patient_id: '', // backend resolves this for patients
             });
+            // Reset and close modal
             setIsModalOpen(false);
-            setNewAppointment(prev => ({ ...prev, appointment_date: '', reason: '' }));
+            setNewAppointment({ doctor_id: '', appointment_date: '', reason: '', patient_id: 0 });
+            setSpecializationFilter('');
+            setDoctorSearch('');
             loadAppointments();
         } catch (error: any) {
             const msg = error?.response?.data?.detail || 'Error booking appointment.';
             setBookingError(msg);
             console.error('Error booking appointment:', error);
         }
+    };
+
+    const openModal = () => {
+        setIsModalOpen(true);
+        setBookingError('');
+        setSpecializationFilter('');
+        setDoctorSearch('');
+        setNewAppointment({ doctor_id: '', appointment_date: '', reason: '', patient_id: 0 });
     };
 
     const handleCancel = async (id: string) => {
@@ -176,7 +208,7 @@ const Appointments: React.FC = () => {
                 </div>
                 {user?.role === 'patient' && (
                     <button
-                        onClick={() => setIsModalOpen(true)}
+                        onClick={openModal}
                         className="btn-primary flex items-center"
                     >
                         <Plus className="h-5 w-5 mr-2" />
@@ -352,22 +384,72 @@ const Appointments: React.FC = () => {
                         )}
 
                         <form onSubmit={handleSubmit} className="space-y-4">
+                            {/* Specialization Filter */}
+                            <div>
+                                <label className="label flex items-center gap-1"><Stethoscope className="h-3.5 w-3.5" /> Filter by Specialization</label>
+                                <select
+                                    className="input-field"
+                                    value={specializationFilter}
+                                    onChange={(e) => {
+                                        setSpecializationFilter(e.target.value);
+                                        setNewAppointment(prev => ({ ...prev, doctor_id: '' }));
+                                    }}
+                                >
+                                    {specializations.map(s => (
+                                        <option key={s} value={s}>{s}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Doctor Search */}
+                            <div>
+                                <label className="label flex items-center gap-1"><Search className="h-3.5 w-3.5" /> Search Doctor</label>
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                                    <input
+                                        className="input-field pl-9"
+                                        placeholder="Type doctor name..."
+                                        value={doctorSearch}
+                                        onChange={(e) => {
+                                            setDoctorSearch(e.target.value);
+                                            setNewAppointment(prev => ({ ...prev, doctor_id: '' }));
+                                        }}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Doctor Cards */}
                             <div>
                                 <label className="label">Select Doctor</label>
-                                {doctors.length === 0 ? (
-                                    <p className="text-sm text-gray-500 italic">No doctors available at the moment.</p>
+                                {filteredDoctors.length === 0 ? (
+                                    <p className="text-sm text-gray-500 italic py-2">No doctors found matching your criteria.</p>
                                 ) : (
-                                    <select
-                                        required
-                                        className="input-field"
-                                        value={newAppointment.doctor_id}
-                                        onChange={(e) => setNewAppointment({ ...newAppointment, doctor_id: Number(e.target.value) })}
-                                    >
-                                        <option value={0} disabled>-- Select a Doctor --</option>
-                                        {doctors.map(d => (
-                                            <option key={d.id} value={d.id}>{d.full_name}</option>
+                                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                        {filteredDoctors.map(d => (
+                                            <button
+                                                key={d.id}
+                                                type="button"
+                                                onClick={() => setNewAppointment(prev => ({ ...prev, doctor_id: d.id }))}
+                                                className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${String(newAppointment.doctor_id) === String(d.id)
+                                                    ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-400'
+                                                    : 'border-gray-200 hover:border-primary-300 hover:bg-gray-50'
+                                                    }`}
+                                            >
+                                                <div className="h-9 w-9 flex-shrink-0 rounded-full bg-green-100 flex items-center justify-center text-green-700 font-bold">
+                                                    {d.full_name.charAt(0)}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-semibold text-gray-900 truncate">{d.full_name}</p>
+                                                    {d.specialization && (
+                                                        <p className="text-xs text-primary-600 font-medium">{d.specialization}</p>
+                                                    )}
+                                                </div>
+                                                {String(newAppointment.doctor_id) === String(d.id) && (
+                                                    <span className="text-primary-600 text-xs font-bold">✓ Selected</span>
+                                                )}
+                                            </button>
                                         ))}
-                                    </select>
+                                    </div>
                                 )}
                             </div>
 
@@ -383,19 +465,7 @@ const Appointments: React.FC = () => {
                                 />
                             </div>
 
-                            <div>
-                                <label className="label">Duration (minutes)</label>
-                                <select
-                                    className="input-field"
-                                    value={newAppointment.duration_minutes}
-                                    onChange={(e) => setNewAppointment({ ...newAppointment, duration_minutes: Number(e.target.value) })}
-                                >
-                                    <option value={15}>15 minutes</option>
-                                    <option value={30}>30 minutes</option>
-                                    <option value={45}>45 minutes</option>
-                                    <option value={60}>1 hour</option>
-                                </select>
-                            </div>
+
 
                             <div>
                                 <label className="label">Reason for Visit</label>
