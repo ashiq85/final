@@ -346,6 +346,27 @@ async def analyze_symptoms(
     if current_user.role == UserRole.PATIENT and not p_id:
         p_doc = db.collection("patients").where("user_id", "==", getattr(current_user, 'id', None)).limit(1).stream()
         for d in p_doc: p_id = d.id
+
+    # Consolidate emergency results for immediate feedback
+    emergency_info = None
+    if stroke["is_emergency"]:
+        emergency_info = EmergencyAssessment(
+            is_emergency=True,
+            condition=stroke["condition"],
+            actions=stroke["emergency_actions"]
+        )
+    elif heart_attack["is_emergency"]:
+        emergency_info = EmergencyAssessment(
+            is_emergency=True,
+            condition=heart_attack["condition"],
+            actions=heart_attack["emergency_actions"]
+        )
+    elif cardiac["is_emergency"]:
+        emergency_info = EmergencyAssessment(
+            is_emergency=True,
+            condition=cardiac["condition"],
+            actions=cardiac["emergency_actions"]
+        )
         
     # Offload the rest to a background task
     background_tasks.add_task(
@@ -370,7 +391,7 @@ async def analyze_symptoms(
         potential_diagnosis=local_analysis.get("potential_diagnosis", ["Analysis in progress..."]),
         recommendations=local_analysis.get("recommendations", ["The AI is reviewing the symptoms."]),
         risk_level="PENDING",
-        emergency_assessment=emergency if emergency.is_emergency else None,
+        emergency_assessment=emergency_info,
         booked_appointment_id=None,
         booked_doctor_name=None
     )
