@@ -16,7 +16,10 @@ api.interceptors.request.use(
         const user = auth.currentUser;
         if (user) {
             const token = await user.getIdToken();
+            console.log("Token added to request");
             config.headers.Authorization = `Bearer ${token}`;
+        } else {
+            console.warn("No auth.currentUser found when making request");
         }
         return config;
     },
@@ -32,6 +35,7 @@ api.interceptors.response.use(
     },
     (error) => {
         if (error.response && error.response.status === 401) {
+            console.error("401 Unauthorized captured in interceptor! Error details:", error.response);
             // Redirect to login if unauthorized
             auth.signOut().then(() => {
                 window.location.href = '/login';

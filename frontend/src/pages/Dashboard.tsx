@@ -151,7 +151,7 @@ const Dashboard: React.FC = () => {
         try {
             await adminAPI.createDoctor({ ...doctorForm, role: 'doctor' });
             setFormSuccess(`Dr. ${doctorForm.full_name} has been added successfully!`);
-            setDoctorForm({ full_name: '', email: '', password: '', specialization: '', customSpecialization: '' });
+            setDoctorForm({ full_name: '', email: '', password: '', specialization: '' });
         } catch (err: any) {
             setFormError(err?.response?.data?.detail || 'Failed to create doctor.');
         }
@@ -164,12 +164,17 @@ const Dashboard: React.FC = () => {
         try {
             await patientsAPI.registerByDoctor(
                 { full_name: patientForm.full_name, email: patientForm.email, password: patientForm.password, role: 'patient' },
-                { phone: patientForm.phone, gender: patientForm.gender, date_of_birth: patientForm.date_of_birth || null }
+                { user_id: 'pending', phone: patientForm.phone, gender: patientForm.gender, date_of_birth: patientForm.date_of_birth || null }
             );
             setFormSuccess(`Patient ${patientForm.full_name} has been registered successfully!`);
             setPatientForm({ full_name: '', email: '', password: '', phone: '', gender: '', date_of_birth: '' });
         } catch (err: any) {
-            setFormError(err?.response?.data?.detail || 'Failed to register patient.');
+            console.error("Failed to register patient:", err.response?.data || err);
+            const detail = err.response?.data?.detail;
+            const errorMsg = Array.isArray(detail)
+                ? detail.map((e: any) => `${e.loc?.join('.')}: ${e.msg}`).join(', ')
+                : (detail || err.message || 'Failed to register patient.');
+            setFormError(errorMsg);
         }
     };
 

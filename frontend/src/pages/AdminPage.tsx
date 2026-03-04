@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { adminAPI } from '../services/api';
-import { UserPlus, Users, Search, CheckCircle, XCircle, Eye, EyeOff, Stethoscope, Phone, Mail, ShieldCheck } from 'lucide-react';
+import { adminAPI, patientsAPI } from '../services/api';
+import { UserPlus, Users, Search, CheckCircle, XCircle, Eye, EyeOff, Stethoscope, Phone, Mail, ShieldCheck, PlusCircle, X } from 'lucide-react';
 
 const SPECIALIZATIONS = [
     'General Physician',
@@ -44,6 +44,12 @@ const AdminPage: React.FC = () => {
     const [isLoadingPatients, setIsLoadingPatients] = useState(false);
     const [isLoadingDoctors, setIsLoadingDoctors] = useState(false);
     const [search, setSearch] = useState('');
+
+    const [isAddPatientOpen, setIsAddPatientOpen] = useState(false);
+    const [patientForm, setPatientForm] = useState({ full_name: '', email: '', password: '', phone: '', gender: '', date_of_birth: '' });
+    const [patientFormError, setPatientFormError] = useState('');
+    const [patientFormSuccess, setPatientFormSuccess] = useState('');
+    const [isSubmittingPatient, setIsSubmittingPatient] = useState(false);
 
     useEffect(() => {
         if (tab === 'patients') loadPatients();
@@ -94,6 +100,35 @@ const AdminPage: React.FC = () => {
             setFormError(err?.response?.data?.detail || 'Failed to create doctor.');
         } finally {
             setIsSubmitting(false);
+        }
+    };
+
+    const handleAddPatient = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setPatientFormError('');
+        setPatientFormSuccess('');
+        setIsSubmittingPatient(true);
+        try {
+            await patientsAPI.registerByDoctor(
+                { full_name: patientForm.full_name, email: patientForm.email, password: patientForm.password, role: 'patient' },
+                { user_id: 'pending', phone: patientForm.phone, gender: patientForm.gender, date_of_birth: patientForm.date_of_birth || null }
+            );
+            setPatientFormSuccess(`Patient ${patientForm.full_name} has been registered successfully!`);
+            setPatientForm({ full_name: '', email: '', password: '', phone: '', gender: '', date_of_birth: '' });
+            loadPatients();
+            setTimeout(() => {
+                setIsAddPatientOpen(false);
+                setPatientFormSuccess('');
+            }, 2000);
+        } catch (err: any) {
+            console.error("registerByDoctor error details:", err.response?.data || err);
+            const detail = err.response?.data?.detail;
+            const errorMsg = Array.isArray(detail)
+                ? detail.map((e: any) => `${e.loc?.join('.')}: ${e.msg}`).join(', ')
+                : (detail || err.message || 'Failed to register patient.');
+            setPatientFormError(errorMsg);
+        } finally {
+            setIsSubmittingPatient(false);
         }
     };
 
@@ -255,14 +290,23 @@ const AdminPage: React.FC = () => {
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                     <div className="p-6 border-b border-gray-100 flex items-center justify-between gap-4">
                         <h2 className="text-lg font-bold text-gray-900">Registered Patients</h2>
-                        <div className="relative flex-1 max-w-xs">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                            <input
-                                className="input-field pl-9 py-2 text-sm"
-                                placeholder="Search by name, email, ID..."
-                                value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                            />
+                        <div className="flex gap-4 flex-1 justify-end">
+                            <div className="relative max-w-xs flex-1">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                                <input
+                                    className="input-field pl-9 py-2 text-sm"
+                                    placeholder="Search by name, email, ID..."
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                />
+                            </div>
+                            <button
+                                onClick={() => { setIsAddPatientOpen(true); setPatientFormError(''); setPatientFormSuccess(''); }}
+                                className="btn-primary flex items-center gap-2 text-sm px-4 py-2"
+                            >
+                                <UserPlus className="h-4 w-4" />
+                                New Patient
+                            </button>
                         </div>
                     </div>
                     {isLoadingPatients ? (
@@ -372,6 +416,67 @@ const AdminPage: React.FC = () => {
                             </tbody>
                         </table>
                     )}
+                </div>
+            )}
+
+            {/* Add Patient Modal */}
+            {isAddPatientOpen && (
+                <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2"><UserPlus className="h-5 w-5 text-blue-600" /> Register New Patient</h3>
+                            <button onClick={() => setIsAddPatientOpen(false)} className="text-gray-400 hover:text-gray-600">
+                                <X className="h-6 w-6" />
+                            </button>
+                        </div>
+                        {patientFormError && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm flex items-center gap-2"><XCircle className="h-4 w-4 flex-shrink-0" />{patientFormError}</div>}
+                        {patientFormSuccess && <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm flex items-center gap-2"><CheckCircle className="h-4 w-4 flex-shrink-0" />{patientFormSuccess}</div>}
+                        <form onSubmit={handleAddPatient} className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="col-span-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                                    <input required className="input-field" placeholder="Jane Doe" value={patientForm.full_name}
+                                        onChange={e => setPatientForm({ ...patientForm, full_name: e.target.value })} />
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                                    <input required type="email" className="input-field" placeholder="patient@email.com" value={patientForm.email}
+                                        onChange={e => setPatientForm({ ...patientForm, email: e.target.value })} />
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Temporary Password</label>
+                                    <input required type="password" className="input-field" placeholder="Min 8 characters" value={patientForm.password}
+                                        onChange={e => setPatientForm({ ...patientForm, password: e.target.value })} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                                    <input className="input-field" placeholder="+91 98765 43210" value={patientForm.phone}
+                                        onChange={e => setPatientForm({ ...patientForm, phone: e.target.value })} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
+                                    <select className="input-field" value={patientForm.gender}
+                                        onChange={e => setPatientForm({ ...patientForm, gender: e.target.value })}>
+                                        <option value="">Select</option>
+                                        <option value="male">Male</option>
+                                        <option value="female">Female</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
+                                    <input type="date" className="input-field" value={patientForm.date_of_birth}
+                                        onChange={e => setPatientForm({ ...patientForm, date_of_birth: e.target.value })} />
+                                </div>
+                            </div>
+                            <div className="flex justify-end space-x-3 pt-4">
+                                <button type="button" onClick={() => setIsAddPatientOpen(false)} className="btn-secondary">Close</button>
+                                <button type="submit" disabled={isSubmittingPatient} className="btn-primary">
+                                    <PlusCircle className="h-4 w-4 mr-2 inline" />{isSubmittingPatient ? 'Registering...' : 'Register Patient'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             )}
         </div>
