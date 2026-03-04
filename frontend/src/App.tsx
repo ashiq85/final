@@ -13,6 +13,7 @@ import Reports from './pages/Reports';
 import PatientManagement from './pages/PatientManagement';
 import AdminPage from './pages/AdminPage';
 import DoctorPatientView from './pages/DoctorPatientView';
+import PatientEncounter from './pages/PatientEncounter';
 
 const queryClient = new QueryClient();
 
@@ -53,6 +54,16 @@ const AppRoutes: React.FC = () => {
           <ProtectedRoute>
             <Layout>
               <PatientManagement />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/encounter/:id"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <PatientEncounter />
             </Layout>
           </ProtectedRoute>
         }

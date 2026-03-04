@@ -17,11 +17,13 @@ AgentHealth is a comprehensive healthcare management system with AI-powered emer
 - ✅ Activate/deactivate user accounts
 - ✅ System-wide user management
 
-### Patient Management
-- ✅ Doctor-initiated patient registration
-- ✅ Patient search functionality
-- ✅ Patient profile management
-- ✅ Medical history tracking
+### Clinician Capabilities (Doctor / Healthcare Provider)
+**Primary Responsibility:** Deliver patient care with AI-assisted support.
+- ✅ **Clinical Dashboard Access**: View patient dashboards, full medical history, and lab reports.
+- ✅ **Clinical Decision Support**: Diagnostic suggestions, AI treatment recommendations, early warning alerts, evidence-based protocols.
+- ✅ **Patient Encounter Management**: Document visits, update diagnoses, prescribe medications, manage treatment plans.
+- ✅ **Communication**: Communicate with patients, send follow-up instructions, respond to reported outcomes.
+- ✅ **Real-Time Alerts**: Sub-5 second critical alerts and risk-based prioritization.
 
 ### Emergency Detection
 - ✅ Stroke detection (FAST protocol)

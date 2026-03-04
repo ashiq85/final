@@ -61,7 +61,7 @@ def detect_stroke_symptoms(symptoms: list, vitals: dict) -> dict:
             stroke_indicators["arm_weakness"] = True
         if any(word in symptom_lower for word in ["speech", "slurred", "confusion", "difficulty speaking"]):
             stroke_indicators["speech_difficulty"] = True
-        if any(word in symptom_lower for word in ["headache", "severe headache", "worst headache"]):
+        if any(word in symptom_lower for word in ["severe headache", "worst headache", "sudden headache", "thunderclap"]):
             stroke_indicators["sudden_severe_headache"] = True
         if any(word in symptom_lower for word in ["vision", "blurred", "double vision", "blind"]):
             stroke_indicators["vision_problems"] = True
@@ -115,7 +115,7 @@ def detect_heart_attack(symptoms: list, vitals: dict) -> dict:
             heart_attack_indicators["arm_pain"] = True
         if any(word in symptom_lower for word in ["jaw", "neck pain", "back pain"]):
             heart_attack_indicators["jaw_pain"] = True
-        if any(word in symptom_lower for word in ["nausea", "vomit", "indigestion"]):
+        if any(word in symptom_lower for word in ["severe nausea", "vomiting profusely", "crushing indigestion"]):
             heart_attack_indicators["nausea"] = True
         if any(word in symptom_lower for word in ["sweat", "cold sweat", "clammy"]):
             heart_attack_indicators["sweating"] = True

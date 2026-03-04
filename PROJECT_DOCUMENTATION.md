@@ -36,7 +36,14 @@ AgentHealth employs a decoupled client-server architecture.
 ### 3.1 Authentication & Authorization
 The system uses **Role-Based Access Control (RBAC)** defining three primary roles:
 1. **Admin**: Can create and manage doctor accounts, view all patients, and manage system-wide settings.
-2. **Doctor**: Can register patients, search and manage patient profiles, record health metrics, and run AI diagnoses.
+2. **Clinician (Doctor / Healthcare Provider)**:
+   * **Primary Responsibility**: Deliver patient care with AI-assisted support.
+   * **Capabilities**:
+      * **Clinical Dashboard Access**: View patient dashboard, access full medical history, review lab results & reports.
+      * **Clinical Decision Support**: Receive diagnostic suggestions, get AI-generated treatment recommendations, view early warning alerts (e.g., sepsis risk), access evidence-based protocols.
+      * **Patient Encounter Management**: Document patient visit, update diagnosis, prescribe medications, manage treatment plans.
+      * **Communication**: Communicate with patients, send follow-up instructions, respond to patient-reported outcomes.
+      * **Real-Time Alerts**: Critical alerts delivered in under 5 seconds, risk-based patient prioritization.
 3. **Patient**: Can self-register, manage their personal profile, and view their medical history.
 
 *Workflow*: Users log in via the `/api/auth/login` endpoint. The backend verifies passwords against bcrypt-hashed DB entries and issues a JWT. The frontend stores this token and passes it in the `Authorization: Bearer <token>` header for all subsequent API requests.

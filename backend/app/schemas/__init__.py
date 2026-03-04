@@ -11,6 +11,10 @@ class UserBase(BaseModel):
     role: UserRole
     specialization: Optional[str] = None
 
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
 
 class UserCreate(UserBase):
     password: str
@@ -263,3 +267,42 @@ class DiagnosisResponse(BaseModel):
     emergency_assessment: Optional[EmergencyAssessment] = None
     booked_appointment_id: Optional[str] = None
     booked_doctor_name: Optional[str] = None
+
+# Encounter & Prescription Schemas
+class PrescriptionCreate(BaseModel):
+    medication_name: str
+    dosage: str
+    frequency: str
+    duration_days: int
+    instructions: Optional[str] = None
+
+class PrescriptionResponse(PrescriptionCreate):
+    id: str
+
+class EncounterCreate(BaseModel):
+    appointment_id: Optional[str] = None
+    visit_notes: str
+    diagnoses: List[str]
+    treatment_plan: str
+
+class EncounterResponse(EncounterCreate):
+    id: str
+    patient_id: str
+    doctor_id: str
+    created_at: datetime
+    prescriptions: List[PrescriptionResponse] = []
+
+# Communication Schemas
+class MessageCreate(BaseModel):
+    recipient_id: str
+    subject: str
+    body: str
+    is_urgent: bool = False
+
+class MessageResponse(MessageCreate):
+    id: str
+    sender_id: str
+    sender_name: str
+    sender_role: str
+    is_read: bool
+    created_at: datetime

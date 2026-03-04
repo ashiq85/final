@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.routes import auth, admin, patients, appointments, diagnosis, alerts
+from app.api.routes import auth, admin, patients, appointments, diagnosis, alerts, encounters, communications
 from app.db.firebase_config import get_firestore_client
 import logging
 
@@ -38,6 +38,8 @@ app.include_router(patients.router, prefix="/api")
 app.include_router(appointments.router, prefix="/api")
 app.include_router(diagnosis.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
+app.include_router(encounters.router, prefix="/api/encounters", tags=["Encounters"])
+app.include_router(communications.router, prefix="/api/communications", tags=["Communications"])
 
 
 @app.on_event("startup")

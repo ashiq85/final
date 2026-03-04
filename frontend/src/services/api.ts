@@ -128,3 +128,17 @@ export const adminAPI = {
     getUsers: (role?: string) => api.get('/admin/users', { params: { role } }),
     getStats: () => api.get('/admin/stats'),
 };
+
+// Encounters API
+export const encountersAPI = {
+    getByPatientId: (patientId: string) => api.get<any[]>(`/encounters/${patientId}`),
+    create: (patientId: string, data: any) => api.post(`/encounters/${patientId}`, data),
+    addPrescription: (encounterId: string, data: any) => api.post(`/encounters/${encounterId}/prescribe`, data),
+};
+
+// Communications API
+export const communicationsAPI = {
+    getInbox: (userId: string) => api.get<any[]>(`/communications/${userId}`),
+    send: (data: any) => api.post('/communications/send', data),
+    markAsRead: (messageId: string) => api.put(`/communications/${messageId}/read`),
+};

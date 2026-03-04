@@ -5,7 +5,7 @@ from app.db.base import get_db
 from app.db.models import User, UserRole, Patient
 from app.core.security import verify_password, create_access_token, decode_access_token, get_password_hash
 from app.core.config import settings
-from app.schemas import Token, UserResponse, UserCreate
+from app.schemas import Token, UserResponse, UserCreate, UserLogin
 from typing import Optional, Any
 from functools import wraps
 import random
@@ -87,7 +87,7 @@ def require_role(*allowed_roles: UserRole):
 
 @router.post("/migrate-legacy", status_code=status.HTTP_200_OK)
 async def migrate_legacy_user(
-    credentials: UserCreate,
+    credentials: UserLogin,
     db: Any = Depends(get_db)
 ):
     """Migrate legacy users from Firestore to Firebase Auth"""

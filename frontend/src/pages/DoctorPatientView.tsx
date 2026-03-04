@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { patientsAPI, appointmentsAPI } from '../services/api';
 import api from '../services/api';
 import {
-    Search, User, FileText, Activity, Calendar, Clipboard,
-    Pill, Droplets, Heart, ChevronDown, ChevronUp, PlusCircle,
+    Search, User, FileText, Activity, Calendar,
+    Pill, ChevronDown, ChevronUp, PlusCircle,
     X, CheckCircle, AlertCircle, Bed
 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -90,7 +90,7 @@ const DoctorPatientView: React.FC = () => {
             } catch {
                 setIpHistory([]); // Backend might not have this route yet
             }
-        } catch (e) {
+        } catch {
             setError('Patient not found. Please check the Patient ID.');
         } finally {
             setIsLoading(false);
@@ -404,9 +404,9 @@ const DoctorPatientView: React.FC = () => {
                                                 <td className="px-5 py-3 text-gray-600">{apt.reason || '—'}</td>
                                                 <td className="px-5 py-3">
                                                     <span className={`text-xs font-bold px-2 py-0.5 rounded capitalize ${apt.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
-                                                            apt.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                                                apt.status === 'cancelled' ? 'bg-red-100 text-red-700' :
-                                                                    'bg-gray-100 text-gray-600'
+                                                        apt.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                                            apt.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                                                                'bg-gray-100 text-gray-600'
                                                         }`}>{apt.status}</span>
                                                 </td>
                                             </tr>

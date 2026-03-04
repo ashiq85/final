@@ -17,14 +17,18 @@ def detect_stroke_symptoms(symptoms: list, vitals: dict) -> dict:
         "face_drooping": False,
         "arm_weakness": False,
         "speech_difficulty": False,
+        "sudden_severe_headache": False
     }
     for symptom in symptoms:
         s_low = symptom.lower()
         if any(w in s_low for w in ["face", "droop", "facial"]): stroke_indicators["face_drooping"] = True
         if any(w in s_low for w in ["arm", "weak", "numb"]): stroke_indicators["arm_weakness"] = True
         if any(w in s_low for w in ["speech", "slur", "confus"]): stroke_indicators["speech_difficulty"] = True
+        if any(w in s_low for w in ["severe headache", "worst headache", "sudden headache"]): stroke_indicators["sudden_severe_headache"] = True
     
-    is_emergency = any(stroke_indicators.values())
+    fast_count = sum([stroke_indicators["face_drooping"], stroke_indicators["arm_weakness"], stroke_indicators["speech_difficulty"]])
+    is_emergency = fast_count >= 1 or stroke_indicators["sudden_severe_headache"]
+    
     return {
         "is_emergency": is_emergency,
         "condition": "Possible Stroke",
@@ -32,9 +36,13 @@ def detect_stroke_symptoms(symptoms: list, vitals: dict) -> dict:
     }
 
 def detect_heart_attack(symptoms: list, vitals: dict) -> dict:
-    chest_pain = any("chest" in s.lower() for s in symptoms)
-    shortness_of_breath = any("breath" in s.lower() for s in symptoms)
-    is_emergency = chest_pain or shortness_of_breath
+    chest_pain = any(w in s.lower() for s in symptoms for w in ["chest pain", "chest pressure", "tightness"])
+    shortness_of_breath = any(w in s.lower() for s in symptoms for w in ["breath", "shortness"])
+    arm_jaw_pain = any(w in s.lower() for s in symptoms for w in ["arm pain", "jaw", "neck pain"])
+    
+    # Require at least chest pain + 1 other symptom, OR severe shortness of breath
+    is_emergency = (chest_pain and arm_jaw_pain) or (chest_pain and shortness_of_breath)
+    
     return {
         "is_emergency": is_emergency,
         "condition": "Possible Heart Attack",
@@ -163,20 +171,19 @@ def _run_diagnosis_background_task(
         }
         db.collection("medical_records").document().set(record_data)
         
-        if risk_level in ["HIGH", "CRITICAL"]:
+        if risk_level == "CRITICAL":
+            # ONLY Auto-book for CRITICAL emergencies
             # Comprehensive disease-to-specialization mapping
             SPECIALIZATION_MAP = [
                 ("Cardiologist",     ["heart", "cardiac", "chest pain", "myocardial", "angina", "arrhythmia",
                                       "palpitation", "coronary", "hypertension", "blood pressure"]),
-                ("Neurologist",      ["stroke", "neuro", "brain", "seizure", "epilepsy", "migraine", "headache",
-                                      "numbness", "tingling", "paralysis", "dementia", "alzheimer", "parkinson",
-                                      "neuropathy", "consciousness"]),
-                ("Pulmonologist",    ["lung", "breath", "asthma", "copd", "pneumonia", "respiratory",
-                                      "oxygen", "wheezing", "cough", "bronchitis", "pulmonary", "shortness of breath"]),
-                ("Gastroenterologist", ["stomach", "abdominal", "liver", "gastro", "intestine", "colon",
-                                        "nausea", "vomiting", "diarrhea", "constipation", "ulcer", "hepatitis",
-                                        "appendix", "pancreatitis", "bowel", "digestive"]),
-                ("Orthopedic",       ["bone", "joint", "fracture", "spine", "back pain", "knee", "shoulder",
+                ("Neurologist",      ["brain", "stroke", "neuro", "seizure", "paralysis", "migraine", 
+                                      "neuropathy", "nerve", "dementia", "numbness"]),
+                ("Pulmonologist",    ["lung", "pulmo", "asthma", "breath", "asthma", "copd", "pneumonia",
+                                      "bronchitis", "respiratory", "cough"]),
+                ("Gastroenterologist", ["stomach", "gastro", "ulcer", "liver", "intestine", "digestion",
+                                      "nausea", "vomiting", "bowel", "acid reflux", "gerd", "abdomen"]),
+                ("Orthopedist",      ["bone", "joint", "muscle", "fracture", "arthritis", "spine", "back pain",
                                       "hip", "ligament", "tendon", "arthritis", "musculo", "orthopedic"]),
                 ("Dermatologist",    ["skin", "rash", "itching", "eczema", "psoriasis", "acne", "allergy",
                                       "derma", "hives", "wound", "infection", "melanoma"]),
@@ -277,6 +284,8 @@ def _run_diagnosis_background_task(
                             if doc_doc.exists:
                                 booked_doctor_name = doc_doc.to_dict().get("full_name", "Specialist")
                             break
+                            
+        if risk_level in ["HIGH", "CRITICAL"]:
             # Create Alert document for HIGH or CRITICAL
             alert_severity = AlertSeverity.HIGH if risk_level == "HIGH" else AlertSeverity.CRITICAL
             new_alert = Alert(

@@ -11,24 +11,31 @@ import {
     Search,
     UserPlus,
     PlusCircle,
-    Heart
+    Heart,
+    Send,
+    X,
+    Inbox,
+    CheckCircle2
 } from 'lucide-react';
-import { alertsAPI, appointmentsAPI, adminAPI, patientsAPI, diagnosisAPI } from '../services/api';
+import { alertsAPI, appointmentsAPI, adminAPI, patientsAPI, communicationsAPI } from '../services/api';
 import api from '../services/api';
-import type { Alert, Appointment } from '../types';
+import type { Alert, Appointment, Patient, Message } from '../types';
 import clsx from 'clsx';
-import { X } from 'lucide-react';
+import CommunicationModal from '../components/CommunicationModal';
 
 const Dashboard: React.FC = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const [alerts, setAlerts] = useState<Alert[]>([]);
     const [appointments, setAppointments] = useState<Appointment[]>([]);
+    const [messages, setMessages] = useState<Message[]>([]);
     const [patientProfile, setPatientProfile] = useState<any>(null);
     const [healthMetrics, setHealthMetrics] = useState<any[]>([]);
     const [isLogModalOpen, setIsLogModalOpen] = useState(false);
+    const [isCommunicationModalOpen, setIsCommunicationModalOpen] = useState(false);
+    const [selectedPatientForMessage, setSelectedPatientForMessage] = useState<Patient | null>(null);
     const [newMetric, setNewMetric] = useState({ metric_name: 'blood_sugar_before', value: '', unit: 'mg/dL', notes: '' });
-    const [diagnosis, setDiagnosis] = useState<any>(null);
+    const [diagnosis] = useState<any>(null);
     const [stats, setStats] = useState({ total_doctors: 0, total_patients: 0, active_alerts: 0, pending_visits: 0 });
     const [patientDocuments, setPatientDocuments] = useState<any[]>([]);
     const [upcomingAppointment, setUpcomingAppointment] = useState<Appointment | null>(null);
@@ -75,6 +82,13 @@ const Dashboard: React.FC = () => {
                 .sort((a, b) => new Date(a.appointment_date).getTime() - new Date(b.appointment_date).getTime());
 
             setUpcomingAppointment(relevant.length > 0 ? relevant[0] : null);
+
+            // Fetch unread messages if patient
+            if (user.role === 'patient') {
+                const msgRes = await communicationsAPI.getInbox(user.uid as string);
+                setMessages(msgRes.data.filter((m: Message) => !m.is_read));
+            }
+
         } catch (error) {
             console.error('Loader: Appointments failed', error);
         } finally {
@@ -137,7 +151,7 @@ const Dashboard: React.FC = () => {
         try {
             await adminAPI.createDoctor({ ...doctorForm, role: 'doctor' });
             setFormSuccess(`Dr. ${doctorForm.full_name} has been added successfully!`);
-            setDoctorForm({ full_name: '', email: '', password: '' });
+            setDoctorForm({ full_name: '', email: '', password: '', specialization: '', customSpecialization: '' });
         } catch (err: any) {
             setFormError(err?.response?.data?.detail || 'Failed to create doctor.');
         }
@@ -162,7 +176,7 @@ const Dashboard: React.FC = () => {
     const handleLogMetric = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            await api.post(`/patients/${patientProfile.id}/health-metrics`, {
+            await patientsAPI.logHealthMetric(patientProfile.id, {
                 ...newMetric,
                 value: parseFloat(newMetric.value)
             });
@@ -170,8 +184,18 @@ const Dashboard: React.FC = () => {
             setNewMetric({ metric_name: 'blood_sugar_before', value: '', unit: 'mg/dL', notes: '' });
             // Redirect to reports page
             navigate('/reports');
+        } catch (error: any) {
+            console.error('Error logging metric:', error?.response?.data || error.message);
+            alert("Failed to save health metric. Please try again.");
+        }
+    };
+
+    const handleMarkMessageRead = async (messageId: string) => {
+        try {
+            await communicationsAPI.markAsRead(messageId);
+            setMessages(prev => prev.filter(m => m.id !== messageId));
         } catch (error) {
-            console.error('Error logging metric:', error);
+            console.error('Error marking message read:', error);
         }
     };
 
@@ -240,7 +264,23 @@ const Dashboard: React.FC = () => {
                                                 <p className="text-xs text-gray-500">{new Date(apt.appointment_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {apt.reason}</p>
                                             </div>
                                         </div>
-                                        <button className="text-primary-600 hover:text-primary-700 text-sm font-medium">Start Session</button>
+                                        <div className="flex space-x-2">
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedPatientForMessage(apt.patient || null);
+                                                    setIsCommunicationModalOpen(true);
+                                                }}
+                                                className="text-gray-500 hover:text-primary-600 text-sm font-medium flex items-center bg-white px-2 py-1 rounded border shadow-sm"
+                                            >
+                                                <Send className="h-3 w-3 mr-1" /> Message
+                                            </button>
+                                            <button
+                                                onClick={() => navigate(`/encounter/${apt.patient_id}`)}
+                                                className="text-white bg-primary-600 hover:bg-primary-700 font-medium px-3 py-1 rounded text-sm shadow-sm"
+                                            >
+                                                Start Encounter
+                                            </button>
+                                        </div>
                                     </div>
                                 ))
                             ) : (
@@ -288,6 +328,13 @@ const Dashboard: React.FC = () => {
                     </DashboardCard>
                 </div>
             </div>
+
+            {/* Direct Messaging Modal */}
+            <CommunicationModal
+                isOpen={isCommunicationModalOpen}
+                onClose={() => setIsCommunicationModalOpen(false)}
+                patient={selectedPatientForMessage}
+            />
         </div>
     );
 
@@ -400,6 +447,43 @@ const Dashboard: React.FC = () => {
                             </div>
                         </DashboardCard>
                     </div>
+
+                    {/* Patient Inbox / Clinical Instructions */}
+                    <DashboardCard title="Inbox & Clinical Instructions" icon={Inbox}>
+                        <div className="space-y-4">
+                            {messages.length > 0 ? (
+                                messages.map(msg => (
+                                    <div key={msg.id} className={clsx(
+                                        "p-4 rounded-lg border shadow-sm",
+                                        msg.is_urgent ? "bg-red-50 border-red-200" : "bg-blue-50 border-blue-100"
+                                    )}>
+                                        <div className="flex justify-between items-start mb-2">
+                                            <div className="flex items-center space-x-2">
+                                                {msg.is_urgent && <AlertCircle className="h-4 w-4 text-red-600" />}
+                                                <h4 className="text-sm font-bold text-gray-900">{msg.subject}</h4>
+                                            </div>
+                                            <span className="text-xs text-gray-500">{new Date(msg.created_at).toLocaleDateString()}</span>
+                                        </div>
+                                        <p className="text-sm text-gray-700 mb-3 whitespace-pre-wrap">{msg.body}</p>
+                                        <div className="flex items-center justify-between text-xs">
+                                            <span className="font-medium text-gray-600">From: {msg.sender_name}</span>
+                                            <button
+                                                onClick={() => handleMarkMessageRead(msg.id)}
+                                                className="flex items-center text-primary-600 hover:text-primary-800 font-medium bg-white px-2 py-1 rounded shadow-sm border border-primary-100"
+                                            >
+                                                <CheckCircle2 className="h-3 w-3 mr-1" /> Mark as Read
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="text-center py-6">
+                                    <Inbox className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                                    <p className="text-sm text-gray-500">Your inbox is empty.</p>
+                                </div>
+                            )}
+                        </div>
+                    </DashboardCard>
                 </div>
 
                 <div className="lg:col-span-1 space-y-6">

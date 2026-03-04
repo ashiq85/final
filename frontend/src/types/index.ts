@@ -7,6 +7,7 @@ export type UserRole = typeof UserRole[keyof typeof UserRole];
 
 export interface User {
     id: string;
+    uid?: string;
     email: string;
     full_name: string;
     role: UserRole;
@@ -113,4 +114,38 @@ export interface HealthReport {
     report_type: string;
     report_data: any;
     pdf_path?: string;
+}
+
+export interface Prescription {
+    id: string;
+    medication_name: string;
+    dosage: string;
+    frequency: string;
+    duration_days: number;
+    instructions?: string;
+}
+
+export interface Encounter {
+    id: string;
+    patient_id: string;
+    doctor_id: string;
+    appointment_id?: string;
+    visit_notes: string;
+    diagnoses: string[];
+    treatment_plan: string;
+    prescriptions: Prescription[];
+    created_at: string;
+}
+
+export interface Message {
+    id: string;
+    sender_id: string;
+    recipient_id: string;
+    sender_name: string;
+    sender_role: string;
+    subject: string;
+    body: string;
+    is_urgent: boolean;
+    is_read: boolean;
+    created_at: string;
 }
