@@ -71,14 +71,9 @@ const Dashboard: React.FC = () => {
             fetchedAppointments = aptsRes.data;
             setAppointments(fetchedAppointments);
 
-            // Sync upcoming visit — keep old value during reload to prevent flicker
-            const now = new Date();
-            const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
+            // Sync upcoming visit - show next scheduled appointment (past or future)
             const relevant = fetchedAppointments
-                .filter(a => {
-                    const aptDate = new Date(a.appointment_date);
-                    return aptDate > fourHoursAgo && a.status === 'scheduled';
-                })
+                .filter(a => a.status === 'scheduled')
                 .sort((a, b) => new Date(a.appointment_date).getTime() - new Date(b.appointment_date).getTime());
 
             setUpcomingAppointment(relevant.length > 0 ? relevant[0] : null);
@@ -495,21 +490,32 @@ const Dashboard: React.FC = () => {
                             </div>
                         ) : upcomingAppointment ? (
                             <div className="text-center p-4">
-                                <div className="text-3xl font-bold text-primary-600 mb-1">
-                                    {new Date(upcomingAppointment.appointment_date).getDate()}
-                                </div>
-                                <div className="text-sm font-medium text-primary-500 uppercase tracking-wide">
-                                    {new Date(upcomingAppointment.appointment_date).toLocaleString('default', { month: 'long' })}
-                                </div>
-                                <div className="mt-4 p-3 bg-white rounded-lg shadow-sm inline-block w-full">
-                                    <p className="text-sm font-bold text-gray-900">
-                                        {new Date(upcomingAppointment.appointment_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </p>
-                                    <p className="text-xs text-gray-500 line-clamp-2">{upcomingAppointment.reason}</p>
-                                </div>
-                                <div className="mt-6">
-                                    <Link to="/appointments" className="btn-secondary w-full text-sm inline-block">Manage Visits</Link>
-                                </div>
+                                {(() => {
+                                    // Handle both Firestore Timestamps and ISO date strings
+                                    const raw = upcomingAppointment.appointment_date as any;
+                                    const aptDate = raw?.seconds ? new Date(raw.seconds * 1000) : new Date(raw);
+                                    const isPast = aptDate < new Date();
+                                    return (
+                                        <>
+                                            <div className={`text-3xl font-bold mb-1 ${isPast ? 'text-amber-500' : 'text-primary-600'}`}>
+                                                {aptDate.getDate()}
+                                            </div>
+                                            <div className="text-sm font-medium text-primary-500 uppercase tracking-wide">
+                                                {aptDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                                            </div>
+                                            {isPast && <p className="text-xs text-amber-600 font-bold mt-1">⚠ Appointment time has passed</p>}
+                                            <div className="mt-4 p-3 bg-white rounded-lg shadow-sm inline-block w-full">
+                                                <p className="text-sm font-bold text-gray-900">
+                                                    {aptDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </p>
+                                                <p className="text-xs text-gray-500 line-clamp-2">{upcomingAppointment.reason}</p>
+                                            </div>
+                                            <div className="mt-6">
+                                                <Link to="/appointments" className="btn-secondary w-full text-sm inline-block">Manage Visits</Link>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
                             </div>
                         ) : (
                             <div className="text-center p-6">

@@ -1,12 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Any, Optional
-from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
+
+from datetime import datetime, timezone
 from app.db.base import get_db
 from app.db.models import Appointment, User, Patient, AppointmentStatus, UserRole, Notification
 from app.api.routes.auth import get_current_user
 from app.schemas import AppointmentCreate, AppointmentUpdate, AppointmentResponse, AppointmentRescheduleSchema, UserBasic, PatientBasic
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
+
+
+def _convert_firestore_timestamps(data: dict) -> dict:
+    """Convert any Firestore Timestamp objects in a dict to Python datetimes."""
+    for key, value in data.items():
+        if hasattr(value, 'seconds') and hasattr(value, 'nanosecond'):
+            # Firestore DatetimeWithNanoseconds
+            data[key] = value.replace(tzinfo=None) if hasattr(value, 'replace') else datetime.fromtimestamp(value.seconds, tz=timezone.utc).replace(tzinfo=None)
+        elif hasattr(value, 'seconds') and hasattr(value, 'nanos'):
+            # Firestore Timestamp
+            data[key] = datetime.fromtimestamp(value.seconds + value.nanos / 1e9, tz=timezone.utc).replace(tzinfo=None)
+        elif isinstance(value, dict):
+            data[key] = _convert_firestore_timestamps(value)
+    return data
 
 
 def _load_appointment_data(db: Any, appointment_id: str) -> Optional[dict]:
@@ -17,6 +35,7 @@ def _load_appointment_data(db: Any, appointment_id: str) -> Optional[dict]:
     
     app_data = app_doc.to_dict()
     app_data['id'] = app_doc.id
+    app_data = _convert_firestore_timestamps(app_data)
     
     # Fetch Doctor
     doc_user = db.collection("users").document(app_data['doctor_id']).get()
@@ -179,7 +198,7 @@ async def get_doctors(
 ):
     """Get list of all active doctors (accessible to all roles for booking)"""
     docs = db.collection("users")\
-        .where("role", "==", UserRole.DOCTOR)\
+        .where("role", "==", UserRole.DOCTOR.value)\
         .where("is_active", "==", True)\
         .stream()
     
@@ -239,28 +258,36 @@ async def get_appointments(
     current_user: User = Depends(get_current_user)
 ):
     """Get appointments based on user role"""
+    logger.info(f"Fetching appointments for user: {current_user.email}, role: {current_user.role}")
     query = db.collection("appointments")
 
     if current_user.role == UserRole.ADMIN:
+        logger.info("Admin role detected, streaming all appointments.")
         docs = query.stream()
     elif current_user.role == UserRole.DOCTOR:
+        logger.info(f"Doctor role detected, filtering by doctor_id: {current_user.id}")
         docs = query.where("doctor_id", "==", current_user.id).stream()
     else:  # Patient
+        logger.info(f"Patient role detected, resolving patient_id for user_id: {current_user.id}")
         p_docs = db.collection("patients").where("user_id", "==", current_user.id).limit(1).stream()
         patient_doc = None
         for d in p_docs: patient_doc = d
         if not patient_doc:
+            logger.warning(f"No patient profile found for user_id: {current_user.id}")
             return []
+        logger.info(f"Filtering by patient_id: {patient_doc.id}")
         docs = query.where("patient_id", "==", patient_doc.id).stream()
     
     results = []
     
     # In-memory caching for related entities to prevent N+1 queries
     cache = {'doctors': {}, 'patients': {}, 'users': {}}
+
     
     def fetch_with_cache(doc):
         app_data = doc.to_dict()
         app_data['id'] = doc.id
+        app_data = _convert_firestore_timestamps(app_data)
         
         doc_id = app_data.get('doctor_id')
         if doc_id and doc_id not in cache['doctors']:

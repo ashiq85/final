@@ -134,16 +134,21 @@ def detect_heart_attack(symptoms: list, vitals: dict) -> dict:
             if hr > 120 or hr < 50:
                 heart_attack_indicators["abnormal_vitals"] = True
     
-    # Major indicators
+    # Major indicators (any ONE of these alone + chest pain is enough)
     major_count = sum([
         heart_attack_indicators["chest_pain"],
         heart_attack_indicators["shortness_of_breath"],
+        heart_attack_indicators["sweating"],
         heart_attack_indicators["abnormal_vitals"]
     ])
     
-    is_heart_attack_likely = major_count >= 2 or (
-        heart_attack_indicators["chest_pain"] and 
-        any([heart_attack_indicators["arm_pain"], heart_attack_indicators["jaw_pain"]])
+    is_heart_attack_likely = (
+        heart_attack_indicators["chest_pain"]  # chest pain alone is always an emergency flag
+        or major_count >= 2
+        or (
+            heart_attack_indicators["chest_pain"] and 
+            any([heart_attack_indicators["arm_pain"], heart_attack_indicators["jaw_pain"]])
+        )
     )
     
     return {

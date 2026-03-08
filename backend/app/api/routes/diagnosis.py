@@ -5,6 +5,7 @@ from app.db.models import User, Patient, HealthMetric, UserRole, Alert, AlertSev
 from app.api.routes.auth import get_current_user
 from app.schemas import SymptomAnalysisRequest, DiagnosisResponse, EmergencyAssessment
 from app.agents.diagnosis_agent import analyze_symptoms as analyze_with_agent, local_symptom_lookup
+from app.agents.emergency_detection_agent import detect_stroke_symptoms, detect_heart_attack, detect_cardiac_emergency
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,55 +13,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/diagnosis", tags=["diagnosis"])
 
 
-def detect_stroke_symptoms(symptoms: list, vitals: dict) -> dict:
-    stroke_indicators = {
-        "face_drooping": False,
-        "arm_weakness": False,
-        "speech_difficulty": False,
-        "sudden_severe_headache": False
-    }
-    for symptom in symptoms:
-        s_low = symptom.lower()
-        if any(w in s_low for w in ["face", "droop", "facial"]): stroke_indicators["face_drooping"] = True
-        if any(w in s_low for w in ["arm", "weak", "numb"]): stroke_indicators["arm_weakness"] = True
-        if any(w in s_low for w in ["speech", "slur", "confus"]): stroke_indicators["speech_difficulty"] = True
-        if any(w in s_low for w in ["severe headache", "worst headache", "sudden headache"]): stroke_indicators["sudden_severe_headache"] = True
-    
-    fast_count = sum([stroke_indicators["face_drooping"], stroke_indicators["arm_weakness"], stroke_indicators["speech_difficulty"]])
-    is_emergency = fast_count >= 1 or stroke_indicators["sudden_severe_headache"]
-    
-    return {
-        "is_emergency": is_emergency,
-        "condition": "Possible Stroke",
-        "emergency_actions": ["CALL 108 IMMEDIATELY", "Note time symptoms started", "Do not give aspirin"] if is_emergency else []
-    }
 
-def detect_heart_attack(symptoms: list, vitals: dict) -> dict:
-    chest_pain = any(w in s.lower() for s in symptoms for w in ["chest pain", "chest pressure", "tightness"])
-    shortness_of_breath = any(w in s.lower() for s in symptoms for w in ["breath", "shortness"])
-    arm_jaw_pain = any(w in s.lower() for s in symptoms for w in ["arm pain", "jaw", "neck pain"])
-    
-    # Require at least chest pain + 1 other symptom, OR severe shortness of breath
-    is_emergency = (chest_pain and arm_jaw_pain) or (chest_pain and shortness_of_breath)
-    
-    return {
-        "is_emergency": is_emergency,
-        "condition": "Possible Heart Attack",
-        "emergency_actions": ["CALL 108 IMMEDIATELY", "Sit down and rest", "Loosen tight clothing"] if is_emergency else []
-    }
-
-def detect_cardiac_emergency(vitals: dict) -> dict:
-    is_emergency = False
-    if vitals and "blood_pressure" in vitals:
-        bp = vitals["blood_pressure"]
-        if isinstance(bp, dict):
-            systolic = bp.get("systolic", 0)
-            if systolic > 180 or systolic < 90: is_emergency = True
-    return {
-        "is_emergency": is_emergency,
-        "condition": "Cardiac Emergency",
-        "emergency_actions": ["CALL 108 IMMEDIATELY", "Monitor breathing", "Be ready for CPR"] if is_emergency else []
-    }
 
 def get_latest_metrics(db: Any, patient_id: str) -> Dict[str, float]:
     """Fetch the latest values for each metric type for a patient from Firestore"""
@@ -83,6 +36,111 @@ def get_latest_metrics(db: Any, patient_id: str) -> Dict[str, float]:
             latest[m["metric_name"]] = m["value"]
     return latest
 
+def _auto_book_emergency_appointment(db, patient_id: str, current_user_id: str, combined_text: str) -> tuple[str, str]:
+    from datetime import datetime, timedelta
+    SPECIALIZATION_MAP = [
+        ("Cardiologist",     ["heart", "cardiac", "chest pain", "myocardial", "angina", "arrhythmia",
+                              "palpitation", "coronary", "hypertension", "blood pressure"]),
+        ("Neurologist",      ["brain", "stroke", "neuro", "seizure", "paralysis", "migraine", 
+                              "neuropathy", "nerve", "dementia", "numbness"]),
+        ("Pulmonologist",    ["lung", "pulmo", "asthma", "breath", "asthma", "copd", "pneumonia",
+                              "bronchitis", "respiratory", "cough"]),
+        ("Gastroenterologist", ["stomach", "gastro", "ulcer", "liver", "intestine", "digestion",
+                              "nausea", "vomiting", "bowel", "acid reflux", "gerd", "abdomen"]),
+        ("Orthopedist",      ["bone", "joint", "muscle", "fracture", "arthritis", "spine", "back pain",
+                              "hip", "ligament", "tendon", "arthritis", "musculo", "orthopedic"]),
+        ("Dermatologist",    ["skin", "rash", "itching", "eczema", "psoriasis", "acne", "allergy",
+                              "derma", "hives", "wound", "infection", "melanoma"]),
+        ("Endocrinologist",  ["diabetes", "thyroid", "hormone", "insulin", "blood sugar", "glucose",
+                              "endocrine", "adrenal", "pituitary", "obesity", "weight gain"]),
+        ("Urologist",        ["kidney", "urine", "urinary", "bladder", "prostate", "renal",
+                              "uti", "incontinence", "nephr", "stone"]),
+        ("Psychiatrist",     ["mental", "anxiety", "depression", "psychi", "panic", "stress",
+                              "hallucination", "bipolar", "schizophrenia", "suicidal"]),
+        ("Gynecologist",     ["gynecol", "menstrual", "pregnancy", "uterus", "ovary", "pelvic",
+                              "vaginal", "obstetric", "breast", "cervical"]),
+        ("Pediatrician",     ["child", "infant", "pediatric", "baby", "fever in child",
+                              "vaccination", "newborn"]),
+        ("ENT Specialist",   ["ear", "nose", "throat", "sinus", "tonsil", "hearing", "ent",
+                              "larynx", "nasal", "vertigo"]),
+        ("Ophthalmologist",  ["eye", "vision", "ophthal", "retina", "cataract", "glaucoma",
+                              "sight", "cornea", "blind"]),
+        ("Oncologist",       ["cancer", "tumor", "oncol", "carcinoma", "malignant", "lymphoma",
+                              "leukemia", "biopsy", "chemo", "metastasis"]),
+    ]
+
+    specialization = "General Physician"
+    for spec_name, keywords in SPECIALIZATION_MAP:
+        if any(kw in combined_text for kw in keywords):
+            specialization = spec_name
+            logger.info(f"Auto-booking specialization resolved: {specialization}")
+            break
+
+    doctor_docs = db.collection("users").where("role", "==", UserRole.DOCTOR.value).where("is_active", "==", True).stream()
+    target_doctor_id = None
+    target_doctor_name = None
+    fallback_doctor_id = None
+    fallback_doctor_name = None
+    for d in doctor_docs:
+        d_data = d.to_dict()
+        fallback_doctor_id = d.id
+        fallback_doctor_name = d_data.get("full_name", "Doctor")
+        if d_data.get("specialization") and d_data["specialization"].lower() == specialization.lower():
+            target_doctor_id = d.id
+            target_doctor_name = d_data.get("full_name", "Doctor")
+            break
+            
+    if not target_doctor_id:
+        target_doctor_id = fallback_doctor_id
+        target_doctor_name = fallback_doctor_name
+
+    if target_doctor_id:
+        apt_date = datetime.utcnow() + timedelta(minutes=30)
+        logger.info(f"[AUTO-BOOK] Attempting to book for patient_id={patient_id} with doctor_id={target_doctor_id}")
+
+        existing = db.collection("appointments").where("patient_id", "==", patient_id).where("status", "==", "scheduled").stream()
+        already_booked = False
+        for e in existing:
+            e_data = e.to_dict()
+            if e_data.get("reason", "").startswith("EMERGENCY AUTO-BOOK:"):
+                already_booked = True
+                logger.info(f"[AUTO-BOOK] Found existing emergency appointment {e.id} — returning it")
+                return e.id, target_doctor_name
+
+        if not already_booked:
+            db_appointment = {
+                "patient_id": patient_id,
+                "doctor_id": target_doctor_id,
+                "appointment_date": apt_date,
+                "duration_minutes": 30,
+                "status": AppointmentStatus.SCHEDULED.value,
+                "reason": f"EMERGENCY AUTO-BOOK: {specialization} required immediately.",
+                "is_follow_up": False,
+                "created_at": datetime.utcnow()
+            }
+            appt_ref = db.collection("appointments").document()
+            appt_ref.set(db_appointment)
+            booked_appointment_id = appt_ref.id
+            booked_doctor_name = target_doctor_name
+            logger.info(f"[AUTO-BOOK] Emergency appointment booked: {appt_ref.id} with doctor {target_doctor_name} for patient {patient_id}")
+
+            notif_data = {
+                "user_id": current_user_id,
+                "notification_type": "alert",
+                "title": "Emergency Appointment Booked",
+                "message": f"An emergency appointment has been booked for you with {target_doctor_name} ({specialization}).",
+                "appointment_id": appt_ref.id,
+                "is_read": False,
+                "created_at": datetime.utcnow()
+            }
+            db.collection("notifications").document().set(notif_data)
+            return booked_appointment_id, booked_doctor_name
+
+    logger.warning(f"[AUTO-BOOK] Could not book — no doctor found.")
+    return None, None
+
+
+
 def _run_diagnosis_background_task(
     db: Any,
     patient_id: str,
@@ -93,7 +151,9 @@ def _run_diagnosis_background_task(
     cardiac: dict,
     current_user_id: str,
     current_user_role: str,
-    notify_user_id: str
+    notify_user_id: str,
+    pre_booked_appointment_id: str = None,
+    pre_booked_doctor_name: str = None
 ):
     """Background task to run the heavy AI analysis and process emergency bookings without blocking the UI."""
     try:
@@ -106,24 +166,28 @@ def _run_diagnosis_background_task(
                 condition=stroke["condition"],
                 actions=stroke["emergency_actions"]
             )
-            risk_level = "HIGH"
+            risk_level = "CRITICAL"
         elif heart_attack["is_emergency"]:
             emergency = EmergencyAssessment(
                 is_emergency=True,
                 condition=heart_attack["condition"],
                 actions=heart_attack["emergency_actions"]
             )
-            risk_level = "HIGH"
+            risk_level = "CRITICAL"
         elif cardiac["is_emergency"]:
             emergency = EmergencyAssessment(
                 is_emergency=True,
                 condition=cardiac["condition"],
                 actions=cardiac["emergency_actions"]
             )
-            risk_level = "HIGH"
+            risk_level = "CRITICAL"
 
         potential_diagnosis = []
         recommendations = []
+        
+        if emergency:
+            potential_diagnosis.append(emergency.condition)
+            recommendations.extend(emergency.actions)
         
         ai_result = {}
         try:
@@ -156,8 +220,8 @@ def _run_diagnosis_background_task(
             recommendations.append("Please consult a healthcare professional immediately for proper evaluation.")
 
         use_id = patient_id if (patient_id and patient_id != "anonymous") else current_user_id
-        booked_appointment_id = None
-        booked_doctor_name = None
+        booked_appointment_id = pre_booked_appointment_id
+        booked_doctor_name = pre_booked_doctor_name
         from datetime import datetime, timedelta
         
         record_data = {
@@ -171,120 +235,12 @@ def _run_diagnosis_background_task(
         }
         db.collection("medical_records").document().set(record_data)
         
-        if risk_level == "CRITICAL":
-            # ONLY Auto-book for CRITICAL emergencies
-            # Comprehensive disease-to-specialization mapping
-            SPECIALIZATION_MAP = [
-                ("Cardiologist",     ["heart", "cardiac", "chest pain", "myocardial", "angina", "arrhythmia",
-                                      "palpitation", "coronary", "hypertension", "blood pressure"]),
-                ("Neurologist",      ["brain", "stroke", "neuro", "seizure", "paralysis", "migraine", 
-                                      "neuropathy", "nerve", "dementia", "numbness"]),
-                ("Pulmonologist",    ["lung", "pulmo", "asthma", "breath", "asthma", "copd", "pneumonia",
-                                      "bronchitis", "respiratory", "cough"]),
-                ("Gastroenterologist", ["stomach", "gastro", "ulcer", "liver", "intestine", "digestion",
-                                      "nausea", "vomiting", "bowel", "acid reflux", "gerd", "abdomen"]),
-                ("Orthopedist",      ["bone", "joint", "muscle", "fracture", "arthritis", "spine", "back pain",
-                                      "hip", "ligament", "tendon", "arthritis", "musculo", "orthopedic"]),
-                ("Dermatologist",    ["skin", "rash", "itching", "eczema", "psoriasis", "acne", "allergy",
-                                      "derma", "hives", "wound", "infection", "melanoma"]),
-                ("Endocrinologist",  ["diabetes", "thyroid", "hormone", "insulin", "blood sugar", "glucose",
-                                      "endocrine", "adrenal", "pituitary", "obesity", "weight gain"]),
-                ("Urologist",        ["kidney", "urine", "urinary", "bladder", "prostate", "renal",
-                                      "uti", "incontinence", "nephr", "stone"]),
-                ("Psychiatrist",     ["mental", "anxiety", "depression", "psychi", "panic", "stress",
-                                      "hallucination", "bipolar", "schizophrenia", "suicidal"]),
-                ("Gynecologist",     ["gynecol", "menstrual", "pregnancy", "uterus", "ovary", "pelvic",
-                                      "vaginal", "obstetric", "breast", "cervical"]),
-                ("Pediatrician",     ["child", "infant", "pediatric", "baby", "fever in child",
-                                      "vaccination", "newborn"]),
-                ("ENT Specialist",   ["ear", "nose", "throat", "sinus", "tonsil", "hearing", "ent",
-                                      "larynx", "nasal", "vertigo"]),
-                ("Ophthalmologist",  ["eye", "vision", "ophthal", "retina", "cataract", "glaucoma",
-                                      "sight", "cornea", "blind"]),
-                ("Oncologist",       ["cancer", "tumor", "oncol", "carcinoma", "malignant", "lymphoma",
-                                      "leukemia", "biopsy", "chemo", "metastasis"]),
-            ]
-
-            specialization = "General Physician"
+        if risk_level == "CRITICAL" and not pre_booked_appointment_id:
+            # ONLY Auto-book for CRITICAL emergencies if not already booked synchronously
             sym_text = " ".join(symptoms).lower()
             diag_text = " ".join(potential_diagnosis).lower()
             combined = sym_text + " " + diag_text
-
-            for spec_name, keywords in SPECIALIZATION_MAP:
-                if any(kw in combined for kw in keywords):
-                    specialization = spec_name
-                    logger.info(f"Auto-booking specialization resolved: {specialization}")
-                    break
-
-                
-            doctor_docs = db.collection("users").where("role", "==", UserRole.DOCTOR.value).where("is_active", "==", True).stream()
-            target_doctor_id = None
-            target_doctor_name = None
-            fallback_doctor_id = None
-            fallback_doctor_name = None
-            for d in doctor_docs:
-                d_data = d.to_dict()
-                fallback_doctor_id = d.id
-                fallback_doctor_name = d_data.get("full_name", "Doctor")
-                if d_data.get("specialization") and d_data["specialization"].lower() == specialization.lower():
-                    target_doctor_id = d.id
-                    target_doctor_name = d_data.get("full_name", "Doctor")
-                    break
-                    
-            if not target_doctor_id:
-                target_doctor_id = fallback_doctor_id
-                target_doctor_name = fallback_doctor_name
-                
-            if target_doctor_id:
-                apt_date = datetime.utcnow() + timedelta(minutes=30)
-                
-                existing = db.collection("appointments").where("patient_id", "==", use_id).where("status", "==", "scheduled").stream()
-                already_booked = False
-                for e in existing:
-                    e_data = e.to_dict()
-                    if e_data.get("reason", "").startswith("EMERGENCY AUTO-BOOK:"):
-                        already_booked = True
-                        break
-                
-                if not already_booked:
-                    db_appointment = {
-                        "patient_id": use_id,
-                        "doctor_id": target_doctor_id,
-                        "appointment_date": apt_date,
-                        "duration_minutes": 30,
-                        "status": AppointmentStatus.SCHEDULED.value,
-                        "reason": f"EMERGENCY AUTO-BOOK: {specialization} required immediately.",
-                        "is_follow_up": False,
-                        "created_at": datetime.utcnow()
-                    }
-                    appt_ref = db.collection("appointments").document()
-                    appt_ref.set(db_appointment)
-                    booked_appointment_id = appt_ref.id
-                    booked_doctor_name = target_doctor_name
-                    logger.info(f"Emergency appointment booked: {appt_ref.id} with doctor {target_doctor_name}")
-                    
-                    notif_data = {
-                        "user_id": current_user_id,
-                        "notification_type": "alert",
-                        "title": "Emergency Appointment Booked",
-                        "message": f"An emergency appointment has been booked for you with {target_doctor_name} ({specialization}).",
-                        "appointment_id": appt_ref.id,
-                        "is_read": False,
-                        "created_at": datetime.utcnow()
-                    }
-                    db.collection("notifications").document().set(notif_data)
-                else:
-                    logger.info(f"Emergency appointment already booked for patient {use_id}, return info.")
-                    existing = db.collection("appointments").where("patient_id", "==", use_id).where("status", "==", "scheduled").stream()
-                    for e in existing:
-                        e_data = e.to_dict()
-                        if e_data.get("reason", "").startswith("EMERGENCY AUTO-BOOK:"):
-                            booked_appointment_id = e.id
-                            doc_doc = db.collection("users").document(e_data['doctor_id']).get()
-                            if doc_doc.exists:
-                                booked_doctor_name = doc_doc.to_dict().get("full_name", "Specialist")
-                            break
-                            
+            booked_appointment_id, booked_doctor_name = _auto_book_emergency_appointment(db, use_id, current_user_id, combined)
         if risk_level in ["HIGH", "CRITICAL"]:
             # Create Alert document for HIGH or CRITICAL
             alert_severity = AlertSeverity.HIGH if risk_level == "HIGH" else AlertSeverity.CRITICAL
@@ -338,9 +294,22 @@ async def analyze_symptoms(
 ):
     """Analyze symptoms and provide diagnosis suggestions"""
     vitals = request.vital_signs or {}
-    stroke = detect_stroke_symptoms(request.symptoms, vitals)
-    heart_attack = detect_heart_attack(request.symptoms, vitals)
-    cardiac = detect_cardiac_emergency(vitals)
+    
+    logger.info(f"[EMERGENCY SCAN] Received symptoms: {request.symptoms}")
+    
+    stroke = {"is_emergency": False, "condition": "", "emergency_actions": []}
+    heart_attack = {"is_emergency": False, "condition": "", "emergency_actions": []}
+    cardiac = {"is_emergency": False, "condition": ""}
+    
+    try:
+        stroke = detect_stroke_symptoms(request.symptoms, vitals)
+        logger.info(f"[EMERGENCY SCAN] Stroke: {stroke['is_emergency']}")
+        heart_attack = detect_heart_attack(request.symptoms, vitals)
+        logger.info(f"[EMERGENCY SCAN] Heart attack: {heart_attack['is_emergency']}")
+        cardiac = detect_cardiac_emergency(vitals)
+        logger.info(f"[EMERGENCY SCAN] Cardiac: {cardiac['is_emergency']}")
+    except Exception as em_err:
+        logger.error(f"[EMERGENCY SCAN] Detection error: {em_err}", exc_info=True)
     
     p_id = request.patient_id
     if current_user.role == UserRole.PATIENT and not p_id:
@@ -361,12 +330,39 @@ async def analyze_symptoms(
             condition=heart_attack["condition"],
             actions=heart_attack["emergency_actions"]
         )
-    elif cardiac["is_emergency"]:
+    elif cardiac.get("is_emergency"):
         emergency_info = EmergencyAssessment(
             is_emergency=True,
             condition=cardiac["condition"],
-            actions=cardiac["emergency_actions"]
+            actions=cardiac.get("emergency_actions", [])
         )
+    
+    logger.info(f"[EMERGENCY SCAN] Final emergency_info: {emergency_info}")
+
+        
+    # Fast local analysis for immediate UI feedback
+    local_analysis = local_symptom_lookup(request.symptoms)
+
+    sync_booked_id = None
+    sync_booked_doctor = None
+
+    if emergency_info:
+        # Only auto-book if we have a valid patient document ID
+        # p_id is the patient collection doc ID; current_user.id is the auth user ID
+        # Only book if p_id is set (i.e., the patient profile was found for this user)
+        booking_patient_id = p_id
+        if not booking_patient_id and current_user.role.value == 'patient':
+            # Try to resolve patient ID for current user
+            p_docs = db.collection("patients").where("user_id", "==", current_user.id).limit(1).stream()
+            for d in p_docs:
+                booking_patient_id = d.id
+        
+        if booking_patient_id:
+            combined = " ".join(request.symptoms).lower() + " " + " ".join(local_analysis.get("potential_diagnosis", [])).lower()
+            sync_booked_id, sync_booked_doctor = _auto_book_emergency_appointment(db, booking_patient_id, current_user.id, combined)
+        else:
+            logger.warning(f"Emergency detected but no patient profile found for user {current_user.id} — skipping auto-book.")
+
         
     # Offload the rest to a background task
     background_tasks.add_task(
@@ -380,20 +376,19 @@ async def analyze_symptoms(
         cardiac=cardiac,
         current_user_id=current_user.id,
         current_user_role=current_user.role.value,
-        notify_user_id=current_user.id
+        notify_user_id=current_user.id,
+        pre_booked_appointment_id=sync_booked_id,
+        pre_booked_doctor_name=sync_booked_doctor
     )
 
-    # Fast local analysis for immediate UI feedback
-    local_analysis = local_symptom_lookup(request.symptoms)
-    
     # Return immediately with local findings
     return DiagnosisResponse(
         potential_diagnosis=local_analysis.get("potential_diagnosis", ["Analysis in progress..."]),
         recommendations=local_analysis.get("recommendations", ["The AI is reviewing the symptoms."]),
-        risk_level="PENDING",
+        risk_level="CRITICAL" if emergency_info else "PENDING",
         emergency_assessment=emergency_info,
-        booked_appointment_id=None,
-        booked_doctor_name=None
+        booked_appointment_id=sync_booked_id,
+        booked_doctor_name=sync_booked_doctor
     )
 
 

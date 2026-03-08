@@ -50,6 +50,7 @@ async def get_current_user(
     except Exception as e:
         logger.error(f"Error validating Firebase token: {e}")
         raise credentials_exception
+
         
     email: str = payload.get("email")
     if email is None:
@@ -163,19 +164,21 @@ async def signup(
             detail="Only patient registration is allowed through signup"
         )
     
-    # Check if user already exists
-    docs = db.collection("users").where("email", "==", user_data.email).limit(1).stream()
-    if any(docs):
+    # Check if user already exists in Firestore
+    docs = list(db.collection("users").where("email", "==", user_data.email).limit(1).stream())
+    if docs:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            detail="Email already registered. Please log in instead."
         )
     
-    # Create user in Firebase Auth
+    # Create or get user in Firebase Auth
+    firebase_uid = None
     try:
         try:
             firebase_user = firebase_auth.get_user_by_email(user_data.email)
-            # Update password to sync it, just in case they existed in Firebase but not in our DB
+            # User exists in Firebase Auth but NOT in Firestore — let's fix their account
+            logger.info(f"Found existing Firebase user for {user_data.email}, syncing Firestore...")
             firebase_auth.update_user(
                 firebase_user.uid,
                 password=user_data.password,
@@ -189,6 +192,7 @@ async def signup(
                 display_name=user_data.full_name
             )
             firebase_uid = firebase_user.uid
+            logger.info(f"Created new Firebase Auth user with UID: {firebase_uid}")
     except Exception as e:
         logger.error(f"Failed to create Firebase Auth user for Signup: {e}")
         raise HTTPException(
@@ -196,7 +200,7 @@ async def signup(
             detail=f"Failed to create authentication account: {str(e)}"
         )
 
-    # Continue caching in Firestore
+    # Save to Firestore using Firebase UID
     hashed_password = get_password_hash(user_data.password)
     new_user = User(
         email=user_data.email,
@@ -206,10 +210,10 @@ async def signup(
         is_active=True
     )
     
-    # Save to Firestore using Firebase UID
     user_ref = db.collection("users").document(firebase_uid)
     user_ref.set(new_user.to_firestore())
     new_user.id = firebase_uid
+    logger.info(f"Saved user document to Firestore with id: {firebase_uid}")
     
     # Create patient profile with medical ID
     try:
@@ -217,16 +221,16 @@ async def signup(
         patient_profile = Patient(
             user_id=new_user.id,
             medical_id=medical_id,
-            full_name=new_user.full_name, # Helpful to have redundantly in Patient doc
+            full_name=new_user.full_name,
             email=new_user.email
         )
         db.collection("patients").document().set(patient_profile.to_firestore())
+        logger.info(f"Created patient profile with medical_id: {medical_id}")
     except Exception as e:
         logger.error(f"Error creating patient profile: {e}")
-        # In Firestore we don't have transactions as easily for multi-collection writes in one go 
-        # but we could use a write batch. For now keep simple.
     
     return new_user
+
 
 # Login endpoint removed. Authentication is now handled by the Firebase JS SDK on the frontend,
 # which provides an ID token that is verified by `get_current_user`.

@@ -58,28 +58,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             await signInWithEmailAndPassword(auth, credentials.email, credentials.password);
         } catch (error: any) {
             console.error('Firebase login error:', error);
-            // If the user isn't in Firebase but has a legacy account, Firebase throws invalid-credential
-            if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+            const code = error.code;
+            // If user does NOT exist in Firebase Auth, check if they have a legacy account
+            if (code === 'auth/invalid-credential' || code === 'auth/user-not-found' || code === 'auth/wrong-password') {
                 try {
                     console.log('Attempting legacy migration...');
-                    // Try the migrate endpoint
                     await api.post('/auth/migrate-legacy', credentials);
-                    // If successful, try Firebase login again!
+                    // Migration succeeded, try Firebase login now
                     await signInWithEmailAndPassword(auth, credentials.email, credentials.password);
-                    return; // Login succeeded after migration
+                    return;
                 } catch (migrationError: any) {
                     console.error('Legacy migration failed:', migrationError);
-                    // Throw the original or meaningful error to the UI
-                    if (migrationError.response && migrationError.response.status === 401) {
-                        throw new Error("Invalid password");
+                    if (migrationError.response?.status === 401) {
+                        throw new Error('Incorrect email or password. Please try again.');
                     }
-                    if (migrationError.response && migrationError.response.status === 404) {
-                        throw new Error("User not found. Please sign up.");
+                    if (migrationError.response?.status === 404) {
+                        throw new Error('No account found with this email. Please sign up first.');
                     }
-                    throw error;
+                    // Firebase specific: the password was wrong in Firebase itself
+                    throw new Error('Incorrect email or password. Please try again.');
                 }
             }
-            throw error;
+            // Map other Firebase error codes to readable messages
+            if (code === 'auth/too-many-requests') {
+                throw new Error('Too many login attempts. Your account has been temporarily disabled. Please try again later.');
+            }
+            if (code === 'auth/invalid-email') {
+                throw new Error('Please enter a valid email address.');
+            }
+            throw new Error('Login failed. Please check your credentials and try again.');
         }
     };
 
@@ -87,14 +94,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             // Call the backend to create the user in Firebase Auth and Firestore
             await api.post('/auth/signup', userData);
-
             // Log in via Firebase to establish the local session
             await signInWithEmailAndPassword(auth, userData.email, userData.password);
         } catch (error: any) {
             console.error('Registration/Login error:', error);
+            // Provide helpful error messages
+            if (error.response?.status === 400) {
+                const detail = error.response?.data?.detail || '';
+                if (detail.includes('already registered') || detail.includes('already exists')) {
+                    throw new Error('An account with this email already exists. Please log in instead.');
+                }
+                throw new Error(detail || 'Registration failed. Please check your details and try again.');
+            }
+            if (error.code === 'auth/email-already-in-use') {
+                throw new Error('An account with this email already exists. Please log in instead.');
+            }
+            if (error.code === 'auth/weak-password') {
+                throw new Error('Password is too weak. Please use at least 6 characters.');
+            }
             throw error;
         }
     };
+
 
     return (
         <AuthContext.Provider value={{ user, isAuthenticated, isLoading, login, register, logout }}>

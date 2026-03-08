@@ -142,13 +142,16 @@ class AppointmentResponse(AppointmentBase):
     status: AppointmentStatus
     notes: Optional[str] = None
     requested_new_date: Optional[datetime] = None
-    is_follow_up: bool
-    created_at: datetime
+    is_follow_up: bool = False
+    created_at: Optional[datetime] = None
+
     doctor: Optional[UserBasic] = None
     patient: Optional[PatientBasic] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
+
+
+
 
 
 # Document Schemas
