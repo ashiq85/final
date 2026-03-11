@@ -17,28 +17,29 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const location = useLocation();
 
     const navigation = (() => {
+        let baseNav = [];
         if (user?.role === 'admin') {
-            return [
+            baseNav = [
                 { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
                 { name: 'Admin Panel', href: '/admin', icon: Users },
             ];
-        }
-        if (user?.role === 'doctor') {
-            return [
+        } else if (user?.role === 'doctor') {
+            baseNav = [
                 { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
                 { name: 'Patient Records', href: '/doctor/patients', icon: Users },
                 { name: 'Appointments', href: '/appointments', icon: Calendar },
+            ];
+        } else {
+            // Patient
+            baseNav = [
+                { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+                { name: 'Appointments', href: '/appointments', icon: Calendar },
+                { name: 'Clinical Support', href: '/clinical-support', icon: Activity },
                 { name: 'Alerts', href: '/alerts', icon: Bell },
+                { name: 'Health Reports', href: '/reports', icon: Heart },
             ];
         }
-        // Patient
-        return [
-            { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-            { name: 'Appointments', href: '/appointments', icon: Calendar },
-            { name: 'Clinical Support', href: '/clinical-support', icon: Activity },
-            { name: 'Alerts', href: '/alerts', icon: Bell },
-            { name: 'Health Reports', href: '/reports', icon: Heart },
-        ];
+        return [...baseNav, { name: 'My Profile', href: '/profile', icon: Users }];
     })();
 
     return (

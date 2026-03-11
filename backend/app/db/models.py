@@ -62,6 +62,8 @@ class Patient(FirestoreModel):
     blood_type: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    height: Optional[float] = None
+    weight: Optional[float] = None
     emergency_contact: Optional[str] = None
     emergency_phone: Optional[str] = None
     medical_history: Optional[List[Dict[str, Any]]] = None

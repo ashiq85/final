@@ -285,9 +285,21 @@ const Dashboard: React.FC = () => {
                     </DashboardCard>
 
                     <DashboardCard title="Patient Lookup" icon={Search}>
-                        <form className="flex space-x-2">
-                            <input type="text" placeholder="Enter Patient ID or Name..." className="input-field flex-grow" />
-                            <button className="btn-primary">Search</button>
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                const query = (e.currentTarget.elements.namedItem('patientQuery') as HTMLInputElement).value;
+                                if (query) navigate(`/doctor/patients?query=${encodeURIComponent(query)}`);
+                            }}
+                            className="flex space-x-2"
+                        >
+                            <input
+                                name="patientQuery"
+                                type="text"
+                                placeholder="Enter Patient ID or Name..."
+                                className="input-field flex-grow"
+                            />
+                            <button type="submit" className="btn-primary">Search</button>
                         </form>
                     </DashboardCard>
                 </div>

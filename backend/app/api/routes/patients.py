@@ -44,44 +44,86 @@ async def search_patients(
     if not query:
         return []
     
-    # Firestore doesn't support complex OR/ILike queries well without a search index
-    # We'll do a simple match on medical_id first, then maybe full_name if possible
     results = []
     
-    # Search by medical_id (exact match for simplicity in this migration step)
+def process_patient_data(db: Any, p_doc: Any) -> Dict[str, Any]:
+    """Helper to process patient document and attach user info"""
+    data = p_doc.to_dict()
+    data['id'] = p_doc.id
+    
+    # Ensure list fields exist
+    for list_field in ['medical_history', 'allergies', 'current_medications']:
+        if list_field not in data or data[list_field] is None:
+            data[list_field] = []
+            
+    # Attach user data
+    user_id = data.get('user_id')
+    if user_id:
+        u_doc = db.collection("users").document(user_id).get()
+        if u_doc.exists:
+            user_data = u_doc.to_dict()
+            user_data['id'] = u_doc.id
+            data['user'] = user_data
+    return data
+
+
+@router.get("/search", response_model=List[PatientResponse])
+async def search_patients(
+    query: Optional[str] = Query(None, description="Search by name, email, or ID"),
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Search patients by name, email, or ID (Admin/Doctor only)"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.DOCTOR]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to search patients"
+        )
+    
+    if not query:
+        return []
+    
+    results = []
+    
+    # helper for unique results
+    seen_ids = set()
+    def add_result(data):
+        if data['id'] not in seen_ids:
+            results.append(PatientResponse(**data))
+            seen_ids.add(data['id'])
+
+    # 1. Search by Firestore Document ID
+    doc = db.collection("patients").document(query).get()
+    if doc.exists:
+        add_result(process_patient_data(db, doc))
+
+    # 2. Search by medical_id
     docs = db.collection("patients").where("medical_id", "==", query).stream()
     for doc in docs:
-        data = doc.to_dict()
-        data['id'] = doc.id
-        results.append(PatientResponse(**data))
+        add_result(process_patient_data(db, doc))
     
-    # If no results, try matching name (exact match)
-    if not results:
-        user_docs = db.collection("users").where("full_name", "==", query).stream()
+    # 3. Search by Name (User collection) - Try both original and Title Case
+    queries_to_try = [query, query.title(), query.lower()]
+    for q in queries_to_try:
+        user_docs = db.collection("users")\
+            .where("full_name", ">=", q)\
+            .where("full_name", "<=", q + '\uf8ff')\
+            .stream()
         for u_doc in user_docs:
             p_docs = db.collection("patients").where("user_id", "==", u_doc.id).stream()
             for p_doc in p_docs:
-                data = p_doc.to_dict()
-                data['id'] = p_doc.id
-                
-                # Attach user data
-                user_data = u_doc.to_dict()
-                user_data['id'] = u_doc.id
-                data['user'] = user_data
-                
-                results.append(PatientResponse(**data))
-    else:
-        # If we got results by medical_id, we still need to attach user data
-        for i, res in enumerate(results):
-            if not getattr(res, 'user', None):
-                user_doc = db.collection("users").document(res.user_id).get()
-                if user_doc.exists:
-                    user_data = user_doc.to_dict()
-                    user_data['id'] = user_doc.id
-                    # Update the result in the list
-                    data = res.model_dump()
-                    data['user'] = user_data
-                    results[i] = PatientResponse(**data)
+                add_result(process_patient_data(db, p_doc))
+
+    # 4. Search by Email (User collection)
+    for q in queries_to_try:
+        user_docs = db.collection("users")\
+            .where("email", ">=", q)\
+            .where("email", "<=", q + '\uf8ff')\
+            .stream()
+        for u_doc in user_docs:
+            p_docs = db.collection("patients").where("user_id", "==", u_doc.id).stream()
+            for p_doc in p_docs:
+                add_result(process_patient_data(db, p_doc))
 
     return results
 
@@ -159,18 +201,7 @@ async def get_patient(
             detail="Patient not found"
         )
     
-    data = doc.to_dict()
-    data['id'] = doc.id
-    
-    # Attach user data
-    user_id = data.get('user_id')
-    if user_id:
-        user_doc = db.collection("users").document(user_id).get()
-        if user_doc.exists:
-            user_data = user_doc.to_dict()
-            user_data['id'] = user_doc.id
-            data['user'] = user_data
-            
+    data = process_patient_data(db, doc)
     return PatientResponse(**data)
 
 
@@ -217,20 +248,8 @@ async def list_patients(
     docs = db.collection("patients").limit(limit).stream()
     results = []
     
-    # Pre-fetch all user info to avoid N+1 querying 
     for doc in docs:
-        data = doc.to_dict()
-        data['id'] = doc.id
-        
-        # Manually fetch the corresponding user profile!
-        user_id = data.get('user_id')
-        if user_id:
-            user_doc = db.collection("users").document(user_id).get()
-            if user_doc.exists:
-                user_data = user_doc.to_dict()
-                user_data['id'] = user_doc.id
-                data['user'] = user_data
-                
+        data = process_patient_data(db, doc)
         results.append(PatientResponse(**data))
     
     return results
@@ -294,19 +313,32 @@ async def doctor_create_patient(
     new_user.id = firebase_uid
     
     # Create patient profile
-    patient = Patient(
-        user_id=new_user.id,
-        primary_doctor_id=current_user.id,
-        medical_id=generate_medical_id(db),
-        email=new_user.email,
-        **patient_data.model_dump(exclude={"user_id", "primary_doctor_id", "email"})
-    )
+    # Use model_dump(exclude_unset=True) but merge with calculated fields
+    p_data = patient_data.model_dump(exclude_unset=True)
+    p_data.update({
+        "user_id": new_user.id,
+        "primary_doctor_id": current_user.id,
+        "medical_id": generate_medical_id(db),
+        "email": user_data.email # Keep sync
+    })
     
-    patient_ref = db.collection("patients").document()
-    patient_ref.set(patient.to_firestore())
-    patient.id = patient_ref.id
+    patient = Patient(**p_data)
     
-    return patient
+    doc_ref = db.collection("patients").document()
+    doc_ref.set(patient.to_firestore())
+    patient.id = doc_ref.id
+    
+    # Return response with user data attached
+    resp_data = patient.model_dump()
+    resp_data['user'] = {
+        "id": new_user.id,
+        "full_name": new_user.full_name,
+        "email": new_user.email,
+        "role": new_user.role,
+        "specialization": new_user.specialization
+    }
+    
+    return PatientResponse(**resp_data)
 
 
 @router.put("/{patient_id}/assign-doctor/{doctor_id}", response_model=PatientResponse)

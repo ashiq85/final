@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Any, Optional
 from app.db.base import get_db
 from app.db.models import Alert, User, Patient, AlertSeverity, UserRole
@@ -73,10 +73,11 @@ def get_alerts(
     skip: int = 0,
     limit: int = 100,
     active_only: bool = True,
+    patient_id: Optional[str] = Query(None),
     db: Any = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get alerts based on user role"""
+    """Get alerts based on user role and optional patient filter"""
     query = db.collection("alerts")
 
     if active_only:
@@ -90,6 +91,8 @@ def get_alerts(
         if not patient_doc:
             return []
         query = query.where("patient_id", "==", patient_doc.id)
+    elif patient_id:
+        query = query.where("patient_id", "==", patient_id)
 
     try:
         from firebase_admin import firestore

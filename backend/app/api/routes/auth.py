@@ -243,3 +243,23 @@ async def get_current_user_info(
     """Get current user information"""
     return current_user
 
+
+@router.put("/me", response_model=UserResponse)
+async def update_me(
+    user_data: UserUpdate,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update current user profile"""
+    user_ref = db.collection("users").document(current_user.id)
+    update_dict = user_data.model_dump(exclude_unset=True)
+    
+    if update_dict:
+        update_dict["updated_at"] = datetime.utcnow()
+        user_ref.update(update_dict)
+        
+    updated_doc = user_ref.get()
+    data = updated_doc.to_dict()
+    data['id'] = updated_doc.id
+    return User(**data)
+

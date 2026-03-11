@@ -19,6 +19,10 @@ class UserLogin(BaseModel):
 class UserCreate(UserBase):
     password: str
 
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    specialization: Optional[str] = None
+
 
 class UserResponse(UserBase):
     id: str
@@ -49,26 +53,38 @@ class PatientBase(BaseModel):
     emergency_phone: Optional[str] = None
     primary_doctor_id: Optional[str] = None
     email: Optional[EmailStr] = None
+    medical_history: List[Dict[str, Any]] = Field(default_factory=list)
+    allergies: List[str] = Field(default_factory=list)
+    current_medications: List[str] = Field(default_factory=list)
+    height: Optional[float] = None
+    weight: Optional[float] = None
 
 
 class PatientCreate(PatientBase):
-    user_id: str
+    user_id: Optional[str] = None
 
 
-class PatientUpdate(PatientBase):
-    medical_history: Optional[Dict] = None
+class PatientUpdate(BaseModel):
+    date_of_birth: Optional[datetime] = None
+    gender: Optional[str] = None
+    blood_type: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    emergency_phone: Optional[str] = None
+    medical_history: Optional[List[Dict[str, Any]]] = None
     allergies: Optional[List[str]] = None
     current_medications: Optional[List[str]] = None
+    height: Optional[float] = None
+    weight: Optional[float] = None
 
 
 class PatientResponse(PatientBase):
     id: str
     user_id: str
     medical_id: Optional[str] = None
-    medical_history: Optional[Dict] = None
-    allergies: Optional[List[str]] = None
-    current_medications: Optional[List[str]] = None
     created_at: datetime
+    user: Optional[UserBasic] = None
     
     class Config:
         from_attributes = True
@@ -92,7 +108,6 @@ class HealthMetricResponse(HealthMetricCreate):
         from_attributes = True
 
 
-# Appointment Schemas
 class UserBasic(BaseModel):
     id: str
     full_name: str

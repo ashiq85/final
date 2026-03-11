@@ -14,6 +14,7 @@ import PatientManagement from './pages/PatientManagement';
 import AdminPage from './pages/AdminPage';
 import DoctorPatientView from './pages/DoctorPatientView';
 import PatientEncounter from './pages/PatientEncounter';
+import Profile from './pages/Profile';
 
 const queryClient = new QueryClient();
 
@@ -125,6 +126,16 @@ const AppRoutes: React.FC = () => {
           <ProtectedRoute>
             <Layout>
               <DoctorPatientView />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Profile />
             </Layout>
           </ProtectedRoute>
         }

@@ -142,3 +142,8 @@ export const communicationsAPI = {
     send: (data: any) => api.post('/communications/send', data),
     markAsRead: (messageId: string) => api.put(`/communications/${messageId}/read`),
 };
+
+// Auth Extensions API
+export const authAPI = {
+    updateMe: (data: any) => api.put('/auth/me', data),
+};

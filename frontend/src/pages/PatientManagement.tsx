@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { patientsAPI } from '../services/api';
 import type { Patient } from '../types';
-import { Search, UserPlus, Info, Phone, Activity as ActivityIcon, PlusCircle, X } from 'lucide-react';
+import { Search, UserPlus, Info, Phone, Activity as ActivityIcon, PlusCircle, X, MessageSquare } from 'lucide-react';
+import CommunicationModal from '../components/CommunicationModal';
 
 const PatientManagement: React.FC = () => {
     const { user } = useAuth();
@@ -21,6 +22,35 @@ const PatientManagement: React.FC = () => {
     const [patientForm, setPatientForm] = useState({ full_name: '', email: '', password: '', phone: '', gender: '', date_of_birth: '' });
     const [formError, setFormError] = useState('');
     const [formSuccess, setFormSuccess] = useState('');
+
+    // Message modal
+    const [isMessageOpen, setIsMessageOpen] = useState(false);
+
+    // Edit Patient state
+    const [isEditingPatient, setIsEditingPatient] = useState(false);
+
+    const handleUpdatePatient = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!selectedPatient) return;
+        setFormError('');
+        setFormSuccess('');
+        try {
+            const updateData = {
+                phone: patientForm.phone,
+                gender: patientForm.gender,
+                date_of_birth: patientForm.date_of_birth ? new Date(patientForm.date_of_birth).toISOString() : null
+            };
+            await patientsAPI.update(selectedPatient.id, updateData);
+            setFormSuccess('Patient updated successfully!');
+            loadPatients();
+            setTimeout(() => {
+                setIsEditingPatient(false);
+                setFormSuccess('');
+            }, 2000);
+        } catch (err: any) {
+            setFormError(err?.response?.data?.detail || 'Failed to update patient.');
+        }
+    };
 
     useEffect(() => {
         loadPatients();
@@ -164,7 +194,29 @@ const PatientManagement: React.FC = () => {
                                     </div>
                                 </div>
                                 <div className="flex space-x-2">
-                                    <button className="btn-secondary text-xs px-3 py-1">Edit</button>
+                                    <button
+                                        onClick={() => setIsMessageOpen(true)}
+                                        className="btn-secondary text-xs px-3 py-1 flex items-center space-x-1"
+                                    >
+                                        <MessageSquare className="h-3 w-3" />
+                                        <span>Message</span>
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setPatientForm({
+                                                full_name: selectedPatient.user?.full_name || '',
+                                                email: selectedPatient.user?.email || '',
+                                                password: '', // Don't show password
+                                                phone: selectedPatient.phone || '',
+                                                gender: selectedPatient.gender || '',
+                                                date_of_birth: selectedPatient.date_of_birth ? new Date(selectedPatient.date_of_birth).toISOString().split('T')[0] : ''
+                                            });
+                                            setIsEditingPatient(true);
+                                        }}
+                                        className="btn-secondary text-xs px-3 py-1"
+                                    >
+                                        Edit
+                                    </button>
                                 </div>
                             </div>
 
@@ -415,6 +467,61 @@ const PatientManagement: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {/* Edit Patient Modal */}
+            {isEditingPatient && (
+                <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900">Edit Patient Profile</h3>
+                            <button onClick={() => setIsEditingPatient(false)} className="text-gray-400 hover:text-gray-600">
+                                <X className="h-6 w-6" />
+                            </button>
+                        </div>
+                        {formError && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded text-sm">{formError}</div>}
+                        {formSuccess && <div className="mb-4 p-3 bg-green-50 text-green-700 rounded text-sm">{formSuccess}</div>}
+                        <form onSubmit={handleUpdatePatient} className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="col-span-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Full Name (Read-only)</label>
+                                    <input disabled className="input-field bg-gray-50" value={patientForm.full_name} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                                    <input className="input-field" placeholder="+91 98765 43210" value={patientForm.phone}
+                                        onChange={e => setPatientForm({ ...patientForm, phone: e.target.value })} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
+                                    <select className="input-field" value={patientForm.gender}
+                                        onChange={e => setPatientForm({ ...patientForm, gender: e.target.value })}>
+                                        <option value="">Select</option>
+                                        <option value="male">Male</option>
+                                        <option value="female">Female</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
+                                    <input type="date" className="input-field" value={patientForm.date_of_birth}
+                                        onChange={e => setPatientForm({ ...patientForm, date_of_birth: e.target.value })} />
+                                </div>
+                            </div>
+                            <div className="flex justify-end space-x-3 pt-4">
+                                <button type="button" onClick={() => setIsEditingPatient(false)} className="btn-secondary">Close</button>
+                                <button type="submit" className="btn-primary">Save Changes</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Message Modal */}
+            <CommunicationModal
+                isOpen={isMessageOpen}
+                onClose={() => setIsMessageOpen(false)}
+                patient={selectedPatient}
+            />
         </div>
     );
 };

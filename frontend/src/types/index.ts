@@ -12,6 +12,7 @@ export interface User {
     full_name: string;
     role: UserRole;
     is_active: boolean;
+    specialization?: string;
 }
 
 export interface AuthResponse {
@@ -25,16 +26,16 @@ export interface Patient {
     date_of_birth: string;
     gender: string;
     blood_type: string;
-    height: number;
-    weight: number;
+    height?: number;
+    weight?: number;
+    phone?: string;
+    email?: string;
+    address?: string;
     allergies: string[];
-    medical_history: string[];
+    medical_history: any[];
     current_medications: string[];
-    emergency_contact: {
-        name: string;
-        relationship: string;
-        phone: string;
-    };
+    emergency_contact?: any;
+    emergency_phone?: string;
     medical_id?: string;
     user?: User;
 }
