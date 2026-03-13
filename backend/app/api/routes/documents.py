@@ -140,7 +140,7 @@ async def search_patient_documents(
     formatted_results = []
     if results and "documents" in results and len(results["documents"]) > 0:
         docs = results["documents"][0]
-        metas = results["metas"][0] if "metas" in results else ([{}] * len(docs))
+        metas = results["metadatas"][0] if "metadatas" in results and results["metadatas"] else ([{}] * len(docs))
         
         for i in range(len(docs)):
             formatted_results.append({
