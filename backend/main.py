@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
-from app.api.routes import auth, admin, patients, appointments, diagnosis, alerts, encounters, communications
+from app.api.routes import auth, admin, patients, appointments, diagnosis, alerts, encounters, communications, feedback, documents, reports
 from app.db.firebase_config import get_firestore_client
 import logging
+import os
 
 # Configure logging
 logging.basicConfig(
@@ -38,8 +40,15 @@ app.include_router(patients.router, prefix="/api")
 app.include_router(appointments.router, prefix="/api")
 app.include_router(diagnosis.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
-app.include_router(encounters.router, prefix="/api/encounters", tags=["Encounters"])
-app.include_router(communications.router, prefix="/api/communications", tags=["Communications"])
+app.include_router(encounters.router, prefix="/api")
+app.include_router(communications.router, prefix="/api")
+app.include_router(feedback.router, prefix="/api")
+app.include_router(documents.router, prefix="/api")
+app.include_router(reports.router, prefix="/api")
+
+# Mount static files
+os.makedirs("app/static/reports", exist_ok=True)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
 @app.on_event("startup")

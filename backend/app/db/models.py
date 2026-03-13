@@ -155,6 +155,31 @@ class Notification(FirestoreModel):
     appointment_id: Optional[str] = None
 
 
+class Feedback(FirestoreModel):
+    """User feedback and reviews for admin"""
+    user_id: str
+    role: str
+    category: str  # suggestion, complaint, review, other
+    subject: str
+    content: str
+    rating: Optional[int] = None
+    is_resolved: bool = False
+    admin_notes: Optional[str] = None
+
+
+class IPRecord(FirestoreModel):
+    """Inpatient (IP) record model"""
+    patient_id: str
+    admission_date: datetime
+    discharge_date: Optional[datetime] = None
+    reason: str
+    ward: Optional[str] = None
+    bed_number: Optional[str] = None
+    attending_doctor: Optional[str] = None
+    notes: Optional[str] = None
+    status: str = "admitted"  # admitted, discharged
+
+
 class AuditLog(FirestoreModel):
     """Audit log for HIPAA compliance"""
     user_id: Optional[str] = None

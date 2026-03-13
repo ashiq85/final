@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Background
 from typing import List, Optional, Any, Dict
 from datetime import datetime
 from app.db.base import get_db
-from app.db.models import Patient, User, UserRole, HealthMetric, HealthReport
-from app.schemas import PatientCreate, PatientUpdate, PatientResponse, UserCreate, HealthMetricCreate, HealthMetricResponse
+from app.db.models import Patient, User, UserRole, HealthMetric, HealthReport, IPRecord
+from app.schemas import PatientCreate, PatientUpdate, PatientResponse, UserCreate, HealthMetricCreate, HealthMetricResponse, PatientMedication, IPRecordCreate, IPRecordResponse
 from app.core.llm import get_llm
 from app.api.routes.auth import get_current_user
 from app.core.security import get_password_hash
@@ -28,24 +28,9 @@ def generate_medical_id(db: Any) -> str:
             return medical_id
 
 
-@router.get("/search", response_model=List[PatientResponse])
-async def search_patients(
-    query: Optional[str] = Query(None, description="Search by name, email, or ID"),
-    db: Any = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Search patients by name, email, or ID (Admin/Doctor only)"""
-    if current_user.role not in [UserRole.ADMIN, UserRole.DOCTOR]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to search patients"
-        )
-    
-    if not query:
-        return []
-    
-    results = []
-    
+
+
+
 def process_patient_data(db: Any, p_doc: Any) -> Dict[str, Any]:
     """Helper to process patient document and attach user info"""
     data = p_doc.to_dict()
@@ -68,7 +53,7 @@ def process_patient_data(db: Any, p_doc: Any) -> Dict[str, Any]:
 
 
 @router.get("/search", response_model=List[PatientResponse])
-async def search_patients(
+def search_patients(
     query: Optional[str] = Query(None, description="Search by name, email, or ID"),
     db: Any = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -88,9 +73,12 @@ async def search_patients(
     # helper for unique results
     seen_ids = set()
     def add_result(data):
-        if data['id'] not in seen_ids:
-            results.append(PatientResponse(**data))
-            seen_ids.add(data['id'])
+        if data and data.get('id') and data['id'] not in seen_ids:
+            try:
+                results.append(PatientResponse(**data))
+                seen_ids.add(data['id'])
+            except Exception:
+                pass
 
     # 1. Search by Firestore Document ID
     doc = db.collection("patients").document(query).get()
@@ -126,6 +114,78 @@ async def search_patients(
                 add_result(process_patient_data(db, p_doc))
 
     return results
+
+
+@router.get("/{id}/medications", response_model=List[PatientMedication])
+async def get_patient_medications(
+    id: str,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Aggregate all prescribed medications for a patient from encounters"""
+    # Check authorization
+    patient_doc = db.collection("patients").document(id).get()
+    if not patient_doc.exists:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    if current_user.role == UserRole.PATIENT and patient_doc.to_dict().get("user_id") != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    # Fetch all encounters for this patient
+    encounters = db.collection("encounters").where("patient_id", "==", id).stream()
+    
+    meds = []
+    for enc_doc in encounters:
+        enc_data = enc_doc.to_dict()
+        prescriptions = enc_data.get("prescriptions", [])
+        
+        # Doc info for "prescribed by"
+        doctor_id = enc_data.get("doctor_id")
+        doctor_name = "Unknown Doctor"
+        if doctor_id:
+            d_doc = db.collection("users").document(doctor_id).get()
+            if d_doc.exists:
+                doctor_name = d_doc.to_dict().get("full_name")
+        
+        for p in prescriptions:
+            meds.append({
+                "medication_name": p.get("medication_name"),
+                "dosage": p.get("dosage"),
+                "frequency": p.get("frequency"),
+                "instructions": p.get("instructions"),
+                "prescribed_by": doctor_name,
+                "prescribed_date": enc_data.get("created_at")
+            })
+            
+    # Sort by date descending
+    meds.sort(key=lambda x: str(x.get("prescribed_date", "")), reverse=True)
+    return meds
+
+
+@router.get("/{id}/search-records")
+async def search_patient_records(
+    id: str,
+    query: str,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Semantic search across vectorized patient documents"""
+    if current_user.role not in [UserRole.DOCTOR, UserRole.ADMIN]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    from app.core.rag_service import rag_service
+    results = await rag_service.query_patient_records(id, query, n_results=5)
+    
+    # Return matched documents and their filenames
+    formatted_results = []
+    if "documents" in results and len(results["documents"]) > 0:
+        for i in range(len(results["documents"][0])):
+            formatted_results.append({
+                "content": results["documents"][0][i],
+                "metadata": results["metadatas"][0][i] if "metadatas" in results else {}
+            })
+            
+    return formatted_results
 
 
 @router.get("/me", response_model=PatientResponse)
@@ -372,7 +432,7 @@ async def assign_doctor(
 
 
 @router.get("/{patient_id}/health-metrics", response_model=List[HealthMetricResponse])
-async def get_health_metrics(
+def get_health_metrics(
     patient_id: str,
     db: Any = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -403,7 +463,7 @@ async def get_health_metrics(
 
 
 @router.post("/{patient_id}/health-metrics", response_model=HealthMetricResponse)
-async def log_health_metric(
+def log_health_metric(
     patient_id: str,
     metric_data: HealthMetricCreate,
     background_tasks: BackgroundTasks,
@@ -423,14 +483,14 @@ async def log_health_metric(
             
     metric = HealthMetric(
         patient_id=patient_id,
-        **metric_data.model_dump()
+        **metric_data.model_dump(exclude_unset=True)
     )
     
     metric_ref = db.collection("health_metrics").document()
     metric_ref.set(metric.to_firestore())
     metric.id = metric_ref.id
     
-    # Trigger background AI analysis
+    # Trigger background AI analysis (runs in threadpool via BackgroundTasks)
     background_tasks.add_task(
         _generate_health_analysis,
         db=db,
@@ -443,8 +503,8 @@ async def log_health_metric(
     return metric
 
 
-async def _generate_health_analysis(db: Any, patient_id: str, metric_name: str, value: float, unit: str):
-    """Generate AI analysis for a newly logged health metric"""
+def _generate_health_analysis(db: Any, patient_id: str, metric_name: str, value: float, unit: str):
+    """Generate AI analysis for a newly logged health metric (runs in threadpool via BackgroundTasks)"""
     try:
         # Fetch patient info for context
         p_doc = db.collection("patients").document(patient_id).get()
@@ -527,3 +587,61 @@ async def get_medical_records(
     # Sort in-memory to avoid index requirement
     results.sort(key=lambda x: str(x.get("visit_date", "")), reverse=True)
     return results[:50]
+
+
+@router.get("/{id}/ip-records", response_model=List[IPRecordResponse])
+def get_patient_ip_records(
+    id: str,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get inpatient history for a patient"""
+    # Check if patient exists
+    patient_doc = db.collection("patients").document(id).get()
+    if not patient_doc.exists:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    # Authorization check
+    if current_user.role == UserRole.PATIENT and patient_doc.to_dict().get("user_id") != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    docs = db.collection("ip_records").where("patient_id", "==", id).stream()
+    
+    results = []
+    for doc in docs:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        results.append(data)
+        
+    # Sort by admission date descending
+    results.sort(key=lambda x: str(x.get("admission_date", "")), reverse=True)
+    return results
+
+
+@router.post("/{id}/ip-records", response_model=IPRecordResponse)
+def add_patient_ip_record(
+    id: str,
+    ip_in: IPRecordCreate,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Add a new inpatient admission record"""
+    # Authorization check - only doctors/admins for now
+    if current_user.role == UserRole.PATIENT:
+        raise HTTPException(status_code=403, detail="Patients cannot add IP records")
+        
+    patient_doc = db.collection("patients").document(id).get()
+    if not patient_doc.exists:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    ip_record = IPRecord(
+        patient_id=id,
+        **ip_in.model_dump()
+    )
+    
+    doc_ref = db.collection("ip_records").document()
+    doc_ref.set(ip_record.to_firestore())
+    
+    data = ip_record.model_dump()
+    data["id"] = doc_ref.id
+    return data

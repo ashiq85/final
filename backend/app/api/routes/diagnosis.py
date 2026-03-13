@@ -141,7 +141,7 @@ def _auto_book_emergency_appointment(db, patient_id: str, current_user_id: str, 
 
 
 
-def _run_diagnosis_background_task(
+async def _run_diagnosis_background_task(
     db: Any,
     patient_id: str,
     symptoms: List[str],
@@ -191,7 +191,7 @@ def _run_diagnosis_background_task(
         
         ai_result = {}
         try:
-            ai_result = analyze_with_agent(
+            ai_result = await analyze_with_agent(
                 patient_id=patient_id or "anonymous",
                 symptoms=symptoms,
                 vitals=vitals

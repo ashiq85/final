@@ -3,17 +3,26 @@ import { patientsAPI, appointmentsAPI } from '../services/api';
 import api from '../services/api';
 import {
     Search, User, FileText, Activity, Calendar,
-    Pill, ChevronDown, ChevronUp, PlusCircle,
+    Pill, PlusCircle, Info,
     X, CheckCircle, AlertCircle, Bed
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { reportsAPI, documentsAPI } from '../services/api';
 
-type Section = 'profile' | 'history' | 'metrics' | 'appointments' | 'ip';
+const safeFormat = (dateStr: any, formatStr: string) => {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    return isValid(d) ? format(d, formatStr) : 'Invalid Date';
+};
+
+type Section = 'profile' | 'history' | 'metrics' | 'appointments' | 'ip' | 'documents' | 'reports';
 const TABS: { id: Section; label: string; icon: any }[] = [
     { id: 'profile', label: 'Patient Profile', icon: User },
     { id: 'ip', label: 'IP Management', icon: Bed },
     { id: 'history', label: 'Medical History', icon: FileText },
+    { id: 'documents', label: 'Documents', icon: FileText },
+    { id: 'reports', label: 'Reports', icon: FileText },
     { id: 'metrics', label: 'Health Metrics', icon: Activity },
     { id: 'appointments', label: 'Appointments', icon: Calendar },
 ];
@@ -32,12 +41,14 @@ interface IPEntry {
 
 const DoctorPatientView: React.FC = () => {
     const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
     const [patientId, setPatientId] = useState('');
     const [patient, setPatient] = useState<any>(null);
     const [searchResults, setSearchResults] = useState<any[]>([]);
     const [medicalRecords, setMedicalRecords] = useState<any[]>([]);
     const [healthMetrics, setHealthMetrics] = useState<any[]>([]);
     const [appointments, setAppointments] = useState<any[]>([]);
+    const [patientDocuments, setPatientDocuments] = useState<any[]>([]);
     const [ipHistory, setIpHistory] = useState<IPEntry[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
@@ -52,6 +63,22 @@ const DoctorPatientView: React.FC = () => {
     });
     const [ipSubmitting, setIpSubmitting] = useState(false);
     const [ipSuccess, setIpSuccess] = useState('');
+
+    // Document Upload state
+    const [uploading, setUploading] = useState(false);
+    const [processVector, setProcessVector] = useState(false);
+    const [uploadType, setUploadType] = useState('clinical_report');
+
+    // Health Metrics Logic
+    const [showMetricForm, setShowMetricForm] = useState(false);
+    const [metricSubmitting, setMetricSubmitting] = useState(false);
+    const [newMetric, setNewMetric] = useState({ metric_name: 'blood_pressure', value: '', unit: 'mmHg', notes: '' });
+
+    // AI Search & Reports state
+    const [aiSearchResults, setAiSearchResults] = useState<any[]>([]);
+    const [aiSearchLoading, setAiSearchLoading] = useState(false);
+    const [patientReports, setPatientReports] = useState<any[]>([]);
+    const [reportGenerating, setReportGenerating] = useState(false);
 
     React.useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -103,16 +130,20 @@ const DoctorPatientView: React.FC = () => {
         setSearchResults([]);
         const id = p.id;
         try {
-            const [recsRes, metricsRes, aptsRes, ipRes] = await Promise.all([
+            const [recsRes, metricsRes, aptsRes, ipRes, docsRes, reportsRes] = await Promise.all([
                 api.get(`/patients/${id}/medical-records`),
                 patientsAPI.getHealthMetrics(id),
-                appointmentsAPI.getAll(),
-                api.get(`/patients/${id}/ip-records`).catch(() => ({ data: [] }))
+                appointmentsAPI.getAll({ patient_id: id }),
+                api.get(`/patients/${id}/ip-records`).catch(() => ({ data: [] })),
+                api.get(`/documents/patient/${id}`).catch(() => ({ data: [] })),
+                reportsAPI.get(id).catch(() => ({ data: [] }))
             ]);
             setMedicalRecords(recsRes.data || []);
             setHealthMetrics(metricsRes.data || []);
-            setAppointments(aptsRes.data.filter((a: any) => a.patient_id === id) || []);
+            setAppointments(aptsRes.data || []);
             setIpHistory(ipRes.data || []);
+            setPatientDocuments(docsRes.data || []);
+            setPatientReports(reportsRes.data || []);
         } catch (err) {
             console.error('Load patient data error:', err);
             setError('Failed to load full record.');
@@ -153,6 +184,98 @@ const DoctorPatientView: React.FC = () => {
             alert('Failed to save IP record.');
         } finally {
             setIpSubmitting(false);
+        }
+    };
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !patient) return;
+
+        setUploading(true);
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('document_type', uploadType);
+
+            // Use query params for basic settings
+            const res = await api.post(`/documents/upload?patient_id=${patient.id}&document_type=${uploadType}&process_vector=${processVector}`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            setPatientDocuments(prev => [res.data, ...prev]);
+            alert('Document uploaded successfully!');
+        } catch (err) {
+            console.error('Upload error:', err);
+            alert('Failed to upload document.');
+        } finally {
+            setUploading(false);
+            e.target.value = ''; // Reset input
+        }
+    };
+
+    const handleLogMetric = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!patient) return;
+        setMetricSubmitting(true);
+
+        // Optimistic update: show metric immediately in the UI
+        const optimisticMetric = {
+            id: `temp-${Date.now()}`,
+            patient_id: patient.id,
+            ...newMetric,
+            value: parseFloat(newMetric.value) || 0,
+            recorded_at: new Date().toISOString(),
+        };
+        setHealthMetrics(prev => [optimisticMetric, ...prev]);
+        setShowMetricForm(false);
+        const prevMetricState = { ...newMetric };
+        setNewMetric({ metric_name: 'blood_pressure', value: '', unit: 'mmHg', notes: '' });
+
+        try {
+            const res = await patientsAPI.logHealthMetric(patient.id, {
+                ...prevMetricState,
+                value: parseFloat(prevMetricState.value) || 0
+            });
+            // Replace the optimistic entry with the real server response
+            setHealthMetrics(prev => prev.map(m => m.id === optimisticMetric.id ? res.data : m));
+        } catch (error) {
+            console.error('Error logging metric:', error);
+            // Rollback optimistic update on failure
+            setHealthMetrics(prev => prev.filter(m => m.id !== optimisticMetric.id));
+            setShowMetricForm(true);
+            setNewMetric(prevMetricState);
+            alert("Failed to save health metric.");
+        } finally {
+            setMetricSubmitting(false);
+        }
+    };
+
+    const handleAISearch = async (query: string) => {
+        if (!query || !patient) return;
+        setAiSearchLoading(true);
+        try {
+            const res = await documentsAPI.searchAI(patient.id, query);
+            setAiSearchResults(res.data || []);
+        } catch (err) {
+            console.error('AI Search error:', err);
+            alert('Failed to perform semantic search.');
+        } finally {
+            setAiSearchLoading(false);
+        }
+    };
+
+    const handleGenerateReport = async () => {
+        if (!patient) return;
+        setReportGenerating(true);
+        try {
+            const res = await reportsAPI.generate(patient.id);
+            setPatientReports(prev => [res.data, ...prev]);
+            alert('Health report generated successfully with AI insights!');
+        } catch (err) {
+            console.error('Report error:', err);
+            alert('Failed to generate report.');
+        } finally {
+            setReportGenerating(false);
         }
     };
 
@@ -373,13 +496,13 @@ const DoctorPatientView: React.FC = () => {
                                                             {ip.status === 'admitted' ? '🏥 Admitted' : '✓ Discharged'}
                                                         </span>
                                                     </div>
-                                                    <span className="text-xs text-gray-400">{ip.admission_date ? format(new Date(ip.admission_date), 'dd MMM yyyy') : '—'}</span>
+                                                    <span className="text-xs text-gray-400">{safeFormat(ip.admission_date, 'dd MMM yyyy')}</span>
                                                 </div>
                                                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-gray-600">
                                                     {ip.ward && <span><strong>Ward:</strong> {ip.ward}</span>}
                                                     {ip.bed_number && <span><strong>Bed:</strong> {ip.bed_number}</span>}
                                                     {ip.attending_doctor && <span><strong>Doctor:</strong> {ip.attending_doctor}</span>}
-                                                    {ip.discharge_date && <span><strong>Discharged:</strong> {format(new Date(ip.discharge_date), 'dd MMM yyyy')}</span>}
+                                                    {ip.discharge_date && <span><strong>Discharged:</strong> {safeFormat(ip.discharge_date, 'dd MMM yyyy')}</span>}
                                                     {ip.notes && <span className="col-span-3 italic">{ip.notes}</span>}
                                                 </div>
                                             </div>
@@ -399,7 +522,7 @@ const DoctorPatientView: React.FC = () => {
                                             <div>
                                                 <p className="font-bold text-gray-900">{rec.diagnosis || 'Diagnosis pending'}</p>
                                                 <p className="text-xs text-gray-500 mt-0.5">
-                                                    {rec.visit_date ? format(new Date(rec.visit_date), 'dd MMM yyyy, HH:mm') : '—'}
+                                                    {safeFormat(rec.visit_date, 'dd MMM yyyy, HH:mm')}
                                                 </p>
                                             </div>
                                         </div>
@@ -435,7 +558,43 @@ const DoctorPatientView: React.FC = () => {
                         )}
 
                         {activeTab === 'metrics' && (
-                            <div className="bg-white rounded-xl border border-gray-100 p-6">
+                            <div className="bg-white rounded-xl border border-gray-100 p-6 space-y-4">
+                                <div className="flex justify-end">
+                                    <button className="btn-primary text-sm flex items-center gap-2" onClick={() => setShowMetricForm(!showMetricForm)}>
+                                        <PlusCircle className="h-4 w-4" /> Add Metric
+                                    </button>
+                                </div>
+
+                                {showMetricForm && (
+                                    <div className="bg-primary-50 rounded-xl p-4 border border-primary-100 mb-4 animate-in fade-in slide-in-from-top-2">
+                                        <h3 className="font-bold text-sm mb-3">Log Health Metric</h3>
+                                        <form onSubmit={handleLogMetric} className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                            <div className="col-span-2 md:col-span-1">
+                                                <label className="text-xs font-bold text-gray-500 uppercase">Metric</label>
+                                                <select className="input-field text-sm mt-1" value={newMetric.metric_name} onChange={e => setNewMetric({ ...newMetric, metric_name: e.target.value })}>
+                                                    <option value="blood_pressure">Blood Pressure (Systolic)</option>
+                                                    <option value="heart_rate">Heart Rate</option>
+                                                    <option value="weight">Weight</option>
+                                                    <option value="temperature">Temperature</option>
+                                                    <option value="blood_sugar">Blood Sugar</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs font-bold text-gray-500 uppercase">Value</label>
+                                                <input required type="number" step="any" className="input-field text-sm mt-1" value={newMetric.value} onChange={e => setNewMetric({ ...newMetric, value: e.target.value })} placeholder="e.g. 120" />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs font-bold text-gray-500 uppercase">Unit</label>
+                                                <input className="input-field text-sm mt-1" value={newMetric.unit} onChange={e => setNewMetric({ ...newMetric, unit: e.target.value })} placeholder="e.g. mmHg" />
+                                            </div>
+                                            <div className="col-span-2 md:col-span-4 flex justify-end gap-2 mt-2">
+                                                <button type="button" onClick={() => setShowMetricForm(false)} className="btn-secondary text-sm">Cancel</button>
+                                                <button type="submit" disabled={metricSubmitting} className="btn-primary text-sm">{metricSubmitting ? 'Saving...' : 'Save Metric'}</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                )}
+
                                 {healthMetrics.length === 0 ? (
                                     <p className="text-center text-gray-400 py-6">No health metrics logged.</p>
                                 ) : (
@@ -447,7 +606,7 @@ const DoctorPatientView: React.FC = () => {
                                                 </p>
                                                 <p className="text-xl font-black text-gray-900">{m.value} <span className="text-xs font-normal text-gray-400">{m.unit}</span></p>
                                                 <p className="text-xs text-gray-400 mt-1">
-                                                    {m.recorded_at ? format(new Date(m.recorded_at), 'dd MMM yyyy') : ''}
+                                                    {safeFormat(m.recorded_at, 'dd MMM yyyy, HH:mm')}
                                                 </p>
                                             </div>
                                         ))}
@@ -473,7 +632,7 @@ const DoctorPatientView: React.FC = () => {
                                         <tbody className="divide-y divide-gray-100">
                                             {appointments.map((apt) => (
                                                 <tr key={apt.id} className="hover:bg-gray-50">
-                                                    <td className="px-5 py-3 text-gray-700">{apt.appointment_date ? format(new Date(apt.appointment_date), 'dd MMM yyyy, HH:mm') : '—'}</td>
+                                                    <td className="px-5 py-3 text-gray-700">{safeFormat(apt.appointment_date, 'dd MMM yyyy, HH:mm')}</td>
                                                     <td className="px-5 py-3 text-gray-700">{apt.doctor?.full_name || '—'}</td>
                                                     <td className="px-5 py-3 text-gray-600">{apt.reason || '—'}</td>
                                                     <td className="px-5 py-3">
@@ -488,6 +647,219 @@ const DoctorPatientView: React.FC = () => {
                                         </tbody>
                                     </table>
                                 )}
+                            </div>
+                        )}
+
+                        {activeTab === 'documents' && (
+                            <div className="bg-white rounded-xl border border-gray-100 p-6 space-y-6">
+                                <div className="bg-primary-50 rounded-xl p-6 border border-primary-100">
+                                    <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+                                        <PlusCircle className="h-5 w-5 text-primary-600" />
+                                        Upload Medical Document
+                                    </h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white p-4 rounded-lg border border-primary-50">
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Document Type</label>
+                                            <select
+                                                className="input-field bg-gray-50 text-sm"
+                                                value={uploadType}
+                                                onChange={e => setUploadType(e.target.value)}
+                                            >
+                                                <option value="clinical_report">Clinical Report</option>
+                                                <option value="lab_result">Lab Result</option>
+                                                <option value="prescription">Prescription</option>
+                                                <option value="imaging">Imaging/Scan</option>
+                                                <option value="discharge_summary">Discharge Summary</option>
+                                            </select>
+                                        </div>
+                                        <div className="flex flex-col justify-end">
+                                            <div className="flex items-center space-x-2 mb-2">
+                                                <input
+                                                    type="checkbox"
+                                                    id="vectorProcess"
+                                                    checked={processVector}
+                                                    onChange={e => setProcessVector(e.target.checked)}
+                                                    className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                                                />
+                                                <label htmlFor="vectorProcess" className="text-sm font-bold text-gray-700 flex items-center gap-1">
+                                                    Process with Vector DB (RAG) <Info className="h-3 w-3 text-gray-400" />
+                                                </label>
+                                            </div>
+                                            <p className="text-[10px] text-gray-500">Enables AI-powered semantic search across this document's content.</p>
+                                        </div>
+                                        <div className="flex items-end">
+                                            <label className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-bold text-sm cursor-pointer transition-all ${uploading ? 'bg-gray-100 text-gray-400' : 'bg-primary-600 text-white hover:bg-primary-700 shadow-lg shadow-primary-200'}`}>
+                                                {uploading ? <Activity className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
+                                                {uploading ? 'Uploading...' : 'Choose File & Upload'}
+                                                <input type="file" className="hidden" onChange={handleFileUpload} disabled={uploading} />
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <h3 className="font-bold text-gray-500 text-xs uppercase tracking-wider px-2">Patient Document Library</h3>
+                                    {patientDocuments.length === 0 ? (
+                                        <div className="text-center py-10 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                                            <FileText className="h-10 w-10 text-gray-300 mx-auto mb-2" />
+                                            <p className="text-sm text-gray-500 font-medium">No documents uploaded for this patient.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {patientDocuments.map((doc) => (
+                                                <div key={doc.id} className="p-4 rounded-xl border border-gray-100 bg-white hover:border-primary-200 hover:shadow-sm transition-all flex items-center justify-between">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="bg-gray-100 p-2.5 rounded-lg">
+                                                            <FileText className="h-5 w-5 text-gray-500" />
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm font-bold text-gray-900 line-clamp-1">{doc.filename}</p>
+                                                            <div className="flex items-center gap-2 mt-0.5">
+                                                                <span className="text-[10px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded font-black uppercase">{doc.document_type?.replace(/_/g, ' ')}</span>
+                                                                {doc.is_vectorized && (
+                                                                    <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-black uppercase flex items-center gap-0.5" title={`${doc.chunks_count || 0} chunks indexed`}>
+                                                                        <CheckCircle className="h-3 w-3" /> Vector Ready
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="pt-6 border-t border-gray-100">
+                                    <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+                                        <Search className="h-5 w-5 text-primary-600" />
+                                        Semantic Search (AI Insights)
+                                    </h3>
+                                    <div className="bg-gray-900 rounded-xl p-6 text-white shadow-xl">
+                                        <p className="text-xs text-gray-400 mb-4 font-medium uppercase tracking-widest">Query indexed records using natural language</p>
+                                        <div className="flex gap-2 mb-6">
+                                            <input
+                                                className="flex-1 bg-gray-800 border-gray-700 text-white placeholder-gray-500 rounded-lg px-4 py-2 text-sm focus:ring-1 focus:ring-primary-500 outline-none"
+                                                placeholder="e.g. Find mention of previous cardiac surgeries or chronic conditions..."
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        handleAISearch((e.target as HTMLInputElement).value);
+                                                    }
+                                                }}
+                                            />
+                                            <button
+                                                onClick={() => {
+                                                    const input = document.querySelector('input[placeholder*="cardiac surgeries"]') as HTMLInputElement;
+                                                    handleAISearch(input?.value);
+                                                }}
+                                                disabled={aiSearchLoading}
+                                                className="bg-primary-600 hover:bg-primary-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors disabled:opacity-50"
+                                            >
+                                                {aiSearchLoading ? 'Searching...' : 'Search'}
+                                            </button>
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            {aiSearchResults.length === 0 && !aiSearchLoading && (
+                                                <div className="p-3 bg-gray-800 rounded-lg border border-gray-700">
+                                                    <p className="text-xs italic text-gray-400">Search results will appear here after searching indexed documents...</p>
+                                                </div>
+                                            )}
+                                            {aiSearchResults.map((res, idx) => (
+                                                <div key={idx} className="p-4 bg-gray-800 rounded-lg border border-gray-700 border-l-4 border-l-primary-500 animate-in fade-in slide-in-from-left-2">
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <span className="text-[10px] font-black uppercase text-primary-400 bg-primary-900/50 px-2 py-0.5 rounded">Result {idx + 1}</span>
+                                                        <span className="text-[10px] text-gray-500 italic">{res.metadata?.filename || 'Unknown Document'}</span>
+                                                    </div>
+                                                    <p className="text-sm text-gray-200 leading-relaxed">"{res.content}"</p>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        <div className="mt-8 pt-6 border-t border-gray-800">
+                                            <h4 className="text-sm font-bold text-primary-400 mb-3 flex items-center gap-2">
+                                                <Info className="h-4 w-4" /> What Happens Next?
+                                            </h4>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+                                                    <p className="text-xs font-bold text-gray-300 mb-1">Report Generation</p>
+                                                    <p className="text-[11px] text-gray-400 leading-normal">When you generate a "Health Report" for the patient, the AI will automatically pull insights from these vectorized documents to make the report more accurate.</p>
+                                                </div>
+                                                <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+                                                    <p className="text-xs font-bold text-gray-300 mb-1">Clinical Support</p>
+                                                    <p className="text-[11px] text-gray-400 leading-normal">The AI diagnosis agent will also have access to the "Vector DB" data to provide better treatment recommendations based on the patient's full history.</p>
+                                                </div>
+                                            </div>
+                                            <p className="mt-4 text-[10px] text-gray-500 italic">Pro-Tip: For the best AI performance, upload documents in Text (.txt), Markdown (.md), or PDF format.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'reports' && (
+                            <div className="bg-white rounded-xl border border-gray-100 p-6 space-y-6">
+                                <div className="flex justify-between items-center">
+                                    <div>
+                                        <h3 className="font-bold text-gray-900">Health Reports</h3>
+                                        <p className="text-xs text-gray-500">AI-synthesized patient health summaries</p>
+                                    </div>
+                                    <button
+                                        disabled={reportGenerating}
+                                        onClick={handleGenerateReport}
+                                        className="btn-primary flex items-center gap-2"
+                                    >
+                                        {reportGenerating ? <Activity className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
+                                        Generate AI Summary Report
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4">
+                                    {patientReports.length === 0 ? (
+                                        <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                                            <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                                            <p className="text-sm text-gray-500 font-medium">No reports generated yet.</p>
+                                            <p className="text-xs text-gray-400 mt-1">Click the button above to synthesize data into a summary.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 gap-4">
+                                            {patientReports.map((report) => (
+                                                <div key={report.id} className="p-5 rounded-xl border border-gray-100 bg-white hover:border-primary-200 shadow-sm transition-all">
+                                                    <div className="flex justify-between items-start mb-4">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="bg-primary-50 p-2.5 rounded-lg">
+                                                                <FileText className="h-6 w-6 text-primary-600" />
+                                                            </div>
+                                                            <div>
+                                                                <h4 className="font-bold text-gray-900 capitalize">{report.report_type} Health Report</h4>
+                                                                <p className="text-xs text-gray-500">{safeFormat(report.created_at, 'dd MMMM yyyy, HH:mm')}</p>
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => reportsAPI.downloadPDF(report.id)}
+                                                            className="text-xs font-bold text-primary-600 hover:text-primary-700 bg-primary-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                                                        >
+                                                            <Activity className="h-3 w-3" /> Download PDF
+                                                        </button>
+                                                    </div>
+
+                                                    {report.report_data?.ai_insights && (
+                                                        <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                                                            <p className="text-[10px] font-black text-primary-600 uppercase mb-2 tracking-widest flex items-center gap-1">
+                                                                <CheckCircle className="h-3 w-3" /> AI Synthesized Insights
+                                                            </p>
+                                                            <ul className="space-y-2">
+                                                                {report.report_data.ai_insights.slice(0, 2).map((insight: string, i: number) => (
+                                                                    <li key={i} className="text-xs text-gray-600 leading-relaxed ml-2 list-disc">{insight}</li>
+                                                                ))}
+                                                            </ul>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
                     </div>

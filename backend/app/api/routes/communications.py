@@ -9,7 +9,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/communications", tags=["Communications"])
 
 @router.post("/send", response_model=MessageResponse)
 async def send_message(
@@ -119,3 +119,44 @@ async def mark_as_read(
     except Exception as e:
         logger.error(f"Error updating message: {e}")
         raise HTTPException(status_code=500, detail="Failed to update message")
+
+@router.get("/notifications/{user_id}", response_model=List[dict])
+async def get_notifications(
+    user_id: str,
+    db: Any = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Get active notifications for a user"""
+    if user.id != user_id and user.role != 'admin':
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    docs = db.collection("notifications")\
+        .where("user_id", "==", user_id)\
+        .order_by("created_at", direction="DESCENDING")\
+        .limit(50)\
+        .stream()
+        
+    results = []
+    for doc in docs:
+        d = doc.to_dict()
+        d["id"] = doc.id
+        results.append(d)
+    return results
+
+@router.put("/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: str,
+    db: Any = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Mark a notification as read"""
+    notif_ref = db.collection("notifications").document(notification_id)
+    doc = notif_ref.get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Notification not found")
+        
+    if doc.to_dict().get("user_id") != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    notif_ref.update({"is_read": True})
+    return {"status": "success"}

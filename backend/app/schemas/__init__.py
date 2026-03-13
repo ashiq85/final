@@ -84,7 +84,7 @@ class PatientResponse(PatientBase):
     user_id: str
     medical_id: Optional[str] = None
     created_at: datetime
-    user: Optional[UserBasic] = None
+    user: Optional['UserBasic'] = None
     
     class Config:
         from_attributes = True
@@ -257,10 +257,39 @@ class NotificationResponse(BaseModel):
     id: str
     notification_type: str
     title: str
-    message: str
+    message: Optional[str] = None
     is_read: bool
     created_at: datetime
     
+    class Config:
+        from_attributes = True
+
+
+# Medication Schemas
+class PatientMedication(BaseModel):
+    medication_name: str
+    dosage: str
+    frequency: str
+    instructions: Optional[str] = None
+    prescribed_by: str
+    prescribed_date: datetime
+
+
+# Feedback Schemas
+class FeedbackCreate(BaseModel):
+    category: str
+    subject: str
+    content: str
+    rating: Optional[int] = None
+
+class FeedbackResponse(FeedbackCreate):
+    id: str
+    user_id: str
+    role: str
+    is_resolved: bool
+    created_at: datetime
+    admin_notes: Optional[str] = None
+
     class Config:
         from_attributes = True
 
@@ -309,6 +338,26 @@ class EncounterResponse(EncounterCreate):
     doctor_id: str
     created_at: datetime
     prescriptions: List[PrescriptionResponse] = []
+
+# IP Record Schemas
+class IPRecordCreate(BaseModel):
+    admission_date: datetime
+    discharge_date: Optional[datetime] = None
+    reason: str
+    ward: Optional[str] = None
+    bed_number: Optional[str] = None
+    attending_doctor: Optional[str] = None
+    notes: Optional[str] = None
+    status: str = "admitted"
+
+class IPRecordResponse(IPRecordCreate):
+    id: str
+    patient_id: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
 
 # Communication Schemas
 class MessageCreate(BaseModel):

@@ -9,7 +9,7 @@ from app.db.models import User
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/encounters", tags=["Encounters"])
 
 @router.post("/{patient_id}", response_model=EncounterResponse)
 async def create_encounter(

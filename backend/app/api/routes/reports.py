@@ -4,14 +4,18 @@ from typing import List, Any, Optional
 from app.db.base import get_db
 from app.db.models import HealthReport, User, Patient, UserRole, MedicalRecord
 from app.api.routes.auth import get_current_user
-from datetime import datetime
+from app.core.rag_service import rag_service
+from app.core.llm import get_llm
+from app.utils.report_generator import generate_patient_report_pdf
+import os
 import json
+from datetime import datetime
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
 @router.post("/", response_model=dict)
-def generate_health_report(
+async def generate_health_report(
     patient_id: str,
     report_type: str = "summary",
     db: Any = Depends(get_db),
@@ -31,15 +35,23 @@ def generate_health_report(
     user_doc = db.collection("users").document(patient_data.get("user_id", "")).get()
     patient_name = user_doc.to_dict().get("full_name", "Unknown") if user_doc.exists else "Unknown"
 
+    # Fetch records without order_by to avoid missing index error
     records_docs = db.collection("medical_records")\
         .where("patient_id", "==", patient_id)\
-        .order_by("visit_date", direction="DESCENDING")\
-        .limit(10)\
         .stream()
 
-    recent_visits = []
+    # Sort in memory
+    recent_visits_raw = []
     for rdoc in records_docs:
         rd = rdoc.to_dict()
+        rd['id'] = rdoc.id
+        recent_visits_raw.append(rd)
+    
+    # Sort by visit_date DESC
+    recent_visits_raw.sort(key=lambda x: str(x.get("visit_date", "")), reverse=True)
+    
+    recent_visits = []
+    for rd in recent_visits_raw[:10]: # Limit to 10
         recent_visits.append({
             "date": str(rd.get("visit_date")),
             "diagnosis": rd.get("diagnosis"),
@@ -61,15 +73,89 @@ def generate_health_report(
         "generated_at": datetime.utcnow().isoformat()
     }
 
+    # Fetch recent health metrics
+    try:
+        metrics_docs = db.collection("health_metrics")\
+            .where("patient_id", "==", patient_id)\
+            .stream()
+        
+        metrics_raw = []
+        for mdoc in metrics_docs:
+            md = mdoc.to_dict()
+            metrics_raw.append({
+                "recorded_at": str(md.get("recorded_at")),
+                "metric": md.get("metric_name"),
+                "value": md.get("value"),
+                "unit": md.get("unit"),
+                "notes": md.get("notes")
+            })
+        
+        # Sort by recorded_at DESC
+        metrics_raw.sort(key=lambda x: str(x.get("recorded_at", "")), reverse=True)
+        report_data["health_metrics"] = metrics_raw[:15] # Include last 15 readings
+    except Exception as e:
+        print(f"Failed to fetch health metrics for report: {e}")
+        report_data["health_metrics"] = []
+
+    doc_ref = db.collection("health_reports").document()
+    
     health_report = HealthReport(
         patient_id=patient_id,
         report_type=report_type,
         report_data=report_data
     )
-    doc_ref = db.collection("health_reports").document()
+    
+    # Optional: Mix in RAG insights
+    try:
+        rag_results = await rag_service.query_patient_records(
+            patient_id, 
+            "Provide a concise clinical narrative summary of this patient's medical history, focusing on chronic conditions, major surgeries, and recent significant findings. Format as a cohesive medical summary."
+        )
+        if rag_results and "documents" in rag_results and len(rag_results["documents"][0]) > 0:
+            # Synthesize raw document chunks into a cohesive narrative using LLM
+            llm = get_llm()
+            context = "\n\n".join(rag_results["documents"][0])
+            
+            # 1. Synthesize general 'Insights from Documents'
+            insight_prompt = f"You are a medical consultant. Synthesize these medical record excerpts into a concise, professional 'Insights from Documents' narrative summary.\n\nFindings:\n{context}\n\nProvide only the synthesized narrative summary."
+            ai_summary = await llm.ainvoke(insight_prompt)
+            report_data["ai_insights"] = ai_summary.content
+            
+            # 2. If medical_history is empty, also synthesize a specific history summary
+            if not report_data.get("medical_history") or len(report_data["medical_history"]) == 0:
+                history_prompt = f"You are a medical scribe. Based ONLY on the following medical record excerpts, write a concise bulleted medical history for this patient. If no history is found, say 'No medical history found in documents'.\n\nExcerpts:\n{context}\n\nProvide ONLY the bullet points."
+                history_summary = await llm.ainvoke(history_prompt)
+                synthesized_history = history_summary.content.strip().split('\n')
+                # Filter out empty lines or preamble
+                final_history = [h.strip().lstrip('*-• ') for h in synthesized_history if h.strip() and not h.lower().startswith('here is')]
+                report_data["medical_history"] = final_history
+                
+            # Update report_data in the model
+            health_report.report_data = report_data
+    except Exception as e:
+        print(f"RAG insights gathering failed for report: {e}")
+
+    # Generate PDF
+    REPORTS_DIR = "app/static/reports"
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    pdf_filename = f"report_{doc_ref.id}.pdf"
+    pdf_path = f"{REPORTS_DIR}/{pdf_filename}"
+    
+    try:
+        generate_patient_report_pdf(report_data, pdf_path)
+        # Update model with PDF path
+        health_report.pdf_path = pdf_path
+    except Exception as e:
+        print(f"PDF generation failed: {e}")
+
     doc_ref.set(health_report.to_firestore())
 
-    return {"id": doc_ref.id, "report_data": report_data, "message": "Report generated successfully"}
+    return {
+        "id": doc_ref.id, 
+        "report_data": report_data, 
+        "pdf_url": f"/static/reports/{pdf_filename}",
+        "message": "Report generated successfully"
+    }
 
 
 @router.get("/patient/{patient_id}", response_model=List[dict])
@@ -89,7 +175,6 @@ def get_patient_reports(
 
     docs = db.collection("health_reports")\
         .where("patient_id", "==", patient_id)\
-        .order_by("created_at", direction="DESCENDING")\
         .stream()
 
     results = []
@@ -97,6 +182,9 @@ def get_patient_reports(
         data = doc.to_dict()
         data['id'] = doc.id
         results.append(data)
+    
+    # Sort by created_at DESC in memory
+    results.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
     return results
 
 

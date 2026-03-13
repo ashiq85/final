@@ -56,6 +56,8 @@ export const patientsAPI = {
     getHealthMetrics: (patientId: string) => api.get<any[]>(`/patients/${patientId}/health-metrics`),
     logHealthMetric: (patientId: string, data: any) => api.post<any>(`/patients/${patientId}/health-metrics`, data),
     getMedicalRecords: (patientId: string) => api.get<any[]>(`/patients/${patientId}/medical-records`),
+    getMedications: (patientId: string) => api.get<any[]>(`/patients/${patientId}/medications`),
+    searchRecords: (patientId: string, query: string) => api.get(`/patients/${patientId}/search-records`, { params: { query } }),
 };
 
 // Appointments API
@@ -92,27 +94,29 @@ export const diagnosisAPI = {
 // Documents API
 export const documentsAPI = {
     getAll: () => api.get('/documents/'),
-    upload: (file: File, type: string) => {
+    upload: (patientId: string, file: File, type: string, processVector: boolean = false) => {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('document_type', type);
-        return api.post('/documents/upload', formData, {
+        return api.post(`/documents/upload?patient_id=${patientId}&document_type=${type}&process_vector=${processVector}`, formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
         });
     },
     delete: (id: string) => api.delete(`/documents/${id}`),
+    searchAI: (patientId: string, query: string) => api.get(`/documents/search/${patientId}`, { params: { query } }),
 };
 
 // Reports API
 export const reportsAPI = {
     get: (patientId: string) => api.get(`/reports/patient/${patientId}`),
-    downloadPDF: (patientId: string) =>
-        api.get(`/reports/patient/${patientId}/download`, { responseType: 'blob' })
+    generate: (patientId: string, type: string = "summary") => api.post(`/reports/`, null, { params: { patient_id: patientId, report_type: type } }),
+    downloadPDF: (reportId: string) =>
+        api.get(`/reports/${reportId}/pdf`, { responseType: 'blob' })
             .then(response => {
                 const url = window.URL.createObjectURL(new Blob([response.data]));
                 const link = document.createElement('a');
                 link.href = url;
-                link.setAttribute('download', `health-report-${patientId}.pdf`);
+                link.setAttribute('download', `health-report-${reportId}.pdf`);
                 document.body.appendChild(link);
                 link.click();
             }),
@@ -141,6 +145,15 @@ export const communicationsAPI = {
     getInbox: (userId: string) => api.get<any[]>(`/communications/${userId}`),
     send: (data: any) => api.post('/communications/send', data),
     markAsRead: (messageId: string) => api.put(`/communications/${messageId}/read`),
+    getNotifications: (userId: string) => api.get<any[]>(`/communications/notifications/${userId}`),
+    markNotificationRead: (id: string) => api.put(`/communications/notifications/${id}/read`),
+};
+
+// Feedback API
+export const feedbackAPI = {
+    submit: (data: any) => api.post('/feedback/', data),
+    getAll: () => api.get('/feedback/'),
+    resolve: (id: string, notes: string) => api.put(`/feedback/${id}/resolve`, { admin_notes: notes }),
 };
 
 // Auth Extensions API

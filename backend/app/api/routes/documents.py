@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Query
 from typing import List, Any, Optional
 from app.db.base import get_db
 from app.db.models import Document, User, Patient, UserRole
 from app.api.routes.auth import get_current_user
+from app.core.rag_service import rag_service
 import os
+import io
+from pypdf import PdfReader
 from datetime import datetime
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -16,11 +19,12 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 async def upload_document(
     patient_id: str,
     document_type: str,
+    process_vector: bool = False,
     file: UploadFile = File(...),
     db: Any = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Upload a medical document"""
+    """Upload a medical document with optional vector processing"""
     patient_doc = db.collection("patients").document(patient_id).get()
     if not patient_doc.exists:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -49,7 +53,38 @@ async def upload_document(
     doc_ref = db.collection("documents").document()
     doc_ref.set(document.to_firestore())
 
-    return {"id": doc_ref.id, "filename": file.filename, "message": "Document uploaded successfully"}
+    # Optional: Vector indexing (RAG)
+    chunks_processed = 0
+    if process_vector:
+        try:
+            text_content = ""
+            if file.content_type in ["text/plain", "text/markdown", "application/json"]:
+                text_content = content.decode("utf-8")
+            elif file.content_type == "application/pdf":
+                reader = PdfReader(io.BytesIO(content))
+                text_content = ""
+                for page in reader.pages:
+                    text_content += page.extract_text() + "\n"
+            
+            if text_content:
+                chunks_processed = await rag_service.process_document(
+                    patient_id=patient_id,
+                    document_id=doc_ref.id,
+                    content=text_content,
+                    metadata={"filename": file.filename, "type": document_type}
+                )
+                doc_ref.update({"is_vectorized": True, "chunks_count": chunks_processed})
+        except Exception as e:
+            # Don't fail the whole upload if vectorization fails
+            print(f"Vectorization failed: {e}")
+
+    return {
+        "id": doc_ref.id, 
+        "filename": file.filename, 
+        "message": "Document uploaded successfully",
+        "vectorized": process_vector and chunks_processed > 0,
+        "chunks": chunks_processed
+    }
 
 
 @router.get("/patient/{patient_id}", response_model=List[dict])
@@ -74,6 +109,43 @@ def get_patient_documents(
         data['id'] = doc.id
         results.append(data)
     return results
+
+
+@router.get("/search/{patient_id}")
+async def search_patient_documents(
+    patient_id: str,
+    query: str = Query(..., min_length=1),
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Perform semantic search across patient's vectorized documents"""
+    print(f"DEBUG: Search request for patient {patient_id} with query: {query}")
+    # Authorization check
+    patient_doc = db.collection("patients").document(patient_id).get()
+    if not patient_doc.exists:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    if current_user.role == UserRole.PATIENT:
+        if patient_doc.to_dict().get("user_id") != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+    # Query RAG service
+    results = await rag_service.query_patient_records(patient_id, query)
+    
+    # Format results for frontend
+    formatted_results = []
+    if results and "documents" in results and len(results["documents"]) > 0:
+        docs = results["documents"][0]
+        metas = results["metas"][0] if "metas" in results else ([{}] * len(docs))
+        
+        for i in range(len(docs)):
+            formatted_results.append({
+                "content": docs[i],
+                "metadata": metas[i] if i < len(metas) else {},
+                "score": 0.0 # ChromaDB score if available
+            })
+            
+    return formatted_results
 
 
 @router.get("/{document_id}", response_model=dict)

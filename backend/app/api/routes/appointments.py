@@ -251,22 +251,28 @@ async def create_appointment(
 
 
 @router.get("/", response_model=List[AppointmentResponse])
-async def get_appointments(
+def get_appointments(
     skip: int = 0,
     limit: int = 100,
+    patient_id: Optional[str] = None,
     db: Any = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get appointments based on user role"""
+    """Get appointments based on user role, with optional patient_id filtering"""
     logger.info(f"Fetching appointments for user: {current_user.email}, role: {current_user.role}")
     query = db.collection("appointments")
 
     if current_user.role == UserRole.ADMIN:
-        logger.info("Admin role detected, streaming all appointments.")
-        docs = query.stream()
+        if patient_id:
+            docs = query.where("patient_id", "==", patient_id).stream()
+        else:
+            docs = query.stream()
     elif current_user.role == UserRole.DOCTOR:
-        logger.info(f"Doctor role detected, filtering by doctor_id: {current_user.id}")
-        docs = query.where("doctor_id", "==", current_user.id).stream()
+        if patient_id:
+            # Doctor viewing a specific patient's appointments
+            docs = query.where("patient_id", "==", patient_id).stream()
+        else:
+            docs = query.where("doctor_id", "==", current_user.id).stream()
     else:  # Patient
         logger.info(f"Patient role detected, resolving patient_id for user_id: {current_user.id}")
         p_docs = db.collection("patients").where("user_id", "==", current_user.id).limit(1).stream()

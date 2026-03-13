@@ -8,6 +8,7 @@ except ImportError:
 from app.agents.tools import search_similar_cases, query_medical_records, create_alert_tool, emergency_detection_tool, query_health_metrics
 from app.core.config import settings
 from app.core.llm import get_llm
+from app.core.rag_service import rag_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -209,7 +210,7 @@ diagnosis_agent = None
 
 
 
-def analyze_symptoms(patient_id: str, symptoms: list, vitals: dict = None) -> dict:
+async def analyze_symptoms(patient_id: str, symptoms: list, vitals: dict = None) -> dict:
     """
     Analyze patient symptoms and provide diagnosis suggestions.
     
@@ -283,13 +284,30 @@ def analyze_symptoms(patient_id: str, symptoms: list, vitals: dict = None) -> di
                 risk_level = "HIGH"
             elif len(symptoms) >= 4:
                 risk_level = "MEDIUM"
+        
+        # Pull RAG context for personalized analysis
+        rag_context = "No previous medical documents available for analysis."
+        if patient_id and patient_id != "anonymous":
+            try:
+                # Query for relevant history
+                rag_results = await rag_service.query_patient_records(patient_id, "chronic diseases, previous surgeries, family medical history, current treatments", n_results=5)
+                if rag_results and "documents" in rag_results and len(rag_results["documents"]) > 0:
+                    docs = rag_results["documents"][0]
+                    if docs:
+                        rag_context = "\n".join([f"- {d}" for d in docs])
+            except Exception as rag_err:
+                logger.warning(f"Failed to fetch RAG context for diagnosis: {rag_err}")
 
         # Use LLM for diagnosis and recommendations
         prompt = f"""You are a clinical diagnosis assistant. Analyze these patient symptoms and provide a JSON diagnosis.
+        Use the provided "Historical Medical Context" from the patient's records to inform your differential diagnosis.
 
 Patient Symptoms: {', '.join(symptoms)}
 Vital Signs: {vitals if vitals else 'Not provided'}
 Risk Level: {risk_level}
+
+Historical Medical Context (from patient's medical documents):
+{rag_context}
 
 Respond ONLY with a valid JSON object in exactly this format (no markdown, no explanation):
 {{

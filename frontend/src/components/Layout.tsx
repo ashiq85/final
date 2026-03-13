@@ -8,7 +8,10 @@ import {
     Bell,
     LogOut,
     Heart,
-    Users
+    Users,
+    Pill,
+    MessageSquare,
+    Inbox
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -35,8 +38,11 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
                 { name: 'Appointments', href: '/appointments', icon: Calendar },
                 { name: 'Clinical Support', href: '/clinical-support', icon: Activity },
+                { name: 'Medications', href: '/medications', icon: Pill },
+                { name: 'Notifications', href: '/notifications', icon: Inbox },
                 { name: 'Alerts', href: '/alerts', icon: Bell },
                 { name: 'Health Reports', href: '/reports', icon: Heart },
+                { name: 'Feedback', href: '/feedback', icon: MessageSquare },
             ];
         }
         return [...baseNav, { name: 'My Profile', href: '/profile', icon: Users }];

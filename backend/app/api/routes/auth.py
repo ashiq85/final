@@ -5,7 +5,7 @@ from app.db.base import get_db
 from app.db.models import User, UserRole, Patient
 from app.core.security import verify_password, create_access_token, decode_access_token, get_password_hash
 from app.core.config import settings
-from app.schemas import Token, UserResponse, UserCreate, UserLogin
+from app.schemas import Token, UserResponse, UserCreate, UserLogin, UserUpdate
 from typing import Optional, Any
 from functools import wraps
 import random
@@ -245,7 +245,7 @@ async def get_current_user_info(
 
 
 @router.put("/me", response_model=UserResponse)
-async def update_me(
+def update_me(
     user_data: UserUpdate,
     db: Any = Depends(get_db),
     current_user: User = Depends(get_current_user)

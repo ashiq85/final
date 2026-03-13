@@ -8,6 +8,7 @@ passlib[bcrypt]
 python-multipart
 crewai
 langchain
+langchain-text-splitters
 langchain-google-genai
 chromadb
 requests
