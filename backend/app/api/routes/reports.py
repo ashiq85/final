@@ -123,12 +123,15 @@ async def generate_health_report(
             
             # 2. If medical_history is empty, also synthesize a specific history summary
             if not report_data.get("medical_history") or len(report_data["medical_history"]) == 0:
-                history_prompt = f"You are a medical scribe. Based ONLY on the following medical record excerpts, write a concise bulleted medical history for this patient. If no history is found, say 'No medical history found in documents'.\n\nExcerpts:\n{context}\n\nProvide ONLY the bullet points."
+                history_prompt = f"You are a medical scribe. Based ONLY on the following medical record excerpts, write a concise bulleted medical history for this patient. If no history is found, return exactly the word 'NONE' and nothing else.\n\nExcerpts:\n{context}"
                 history_summary = await llm.ainvoke(history_prompt)
-                synthesized_history = history_summary.content.strip().split('\n')
-                # Filter out empty lines or preamble
-                final_history = [h.strip().lstrip('*-• ') for h in synthesized_history if h.strip() and not h.lower().startswith('here is')]
-                report_data["medical_history"] = final_history
+                content = history_summary.content.strip()
+                if content != "NONE":
+                    synthesized_history = content.split('\n')
+                    # Filter out empty lines or preamble
+                    final_history = [h.strip().lstrip('*-• ') for h in synthesized_history if h.strip() and not h.lower().startswith('here is')]
+                    if final_history:
+                        report_data["medical_history"] = final_history
                 
             # Update report_data in the model
             health_report.report_data = report_data

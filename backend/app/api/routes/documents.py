@@ -6,7 +6,7 @@ from app.api.routes.auth import get_current_user
 from app.core.rag_service import rag_service
 import os
 import io
-from pypdf import PdfReader
+import fitz  # PyMuPDF
 from datetime import datetime
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -61,12 +61,14 @@ async def upload_document(
             if file.content_type in ["text/plain", "text/markdown", "application/json"]:
                 text_content = content.decode("utf-8")
             elif file.content_type == "application/pdf":
-                reader = PdfReader(io.BytesIO(content))
+                # Use PyMuPDF for robust extraction
+                doc = fitz.open(stream=content, filetype="pdf")
                 text_content = ""
-                for page in reader.pages:
-                    text_content += page.extract_text() + "\n"
+                for page in doc:
+                    text_content += page.get_text() + "\n"
+                doc.close()
             
-            if text_content:
+            if text_content and text_content.strip():
                 chunks_processed = await rag_service.process_document(
                     patient_id=patient_id,
                     document_id=doc_ref.id,
@@ -74,6 +76,8 @@ async def upload_document(
                     metadata={"filename": file.filename, "type": document_type}
                 )
                 doc_ref.update({"is_vectorized": True, "chunks_count": chunks_processed})
+            else:
+                print(f"Warning: No text extracted from {file.filename}")
         except Exception as e:
             # Don't fail the whole upload if vectorization fails
             print(f"Vectorization failed: {e}")

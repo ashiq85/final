@@ -16,4 +16,5 @@ httpx
 python-dotenv
 pytest
 firebase-admin
+PyMuPDF
 # psycopg2-binary removed for SQLite
