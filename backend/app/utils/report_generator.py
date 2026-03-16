@@ -33,11 +33,18 @@ def generate_patient_report_pdf(report_data: dict, output_path: str):
     story.append(Spacer(1, 12))
 
     # AI Insights Section
-    if "ai_insights" in report_data:
+    if "ai_insights" in report_data and report_data["ai_insights"]:
         story.append(Paragraph("<b>Insights from Documents (AI Synthesis)</b>", styles['Heading2']))
         insights_text = report_data["ai_insights"]
-        story.append(Paragraph(f"<i>{insights_text}</i>", styles['BodyText']))
+        # Split into lines to properly render multi-line insights and excerpts
+        for line in insights_text.split('\n'):
+            line = line.strip()
+            if line:
+                story.append(Paragraph(line, styles['BodyText']))
+            else:
+                story.append(Spacer(1, 4))
         story.append(Spacer(1, 12))
+
 
     # Health Metrics Section
     metrics = report_data.get("health_metrics", [])

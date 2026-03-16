@@ -66,7 +66,7 @@ const DoctorPatientView: React.FC = () => {
 
     // Document Upload state
     const [uploading, setUploading] = useState(false);
-    const [processVector, setProcessVector] = useState(false);
+    const [processVector, setProcessVector] = useState(true);
     const [uploadType, setUploadType] = useState('clinical_report');
 
     // Health Metrics Logic
@@ -76,6 +76,8 @@ const DoctorPatientView: React.FC = () => {
 
     // AI Search & Reports state
     const [aiSearchResults, setAiSearchResults] = useState<any[]>([]);
+    const [aiAnswer, setAiAnswer] = useState<string>('');
+    const [aiSearchQuery, setAiSearchQuery] = useState<string>('');
     const [aiSearchLoading, setAiSearchLoading] = useState(false);
     const [patientReports, setPatientReports] = useState<any[]>([]);
     const [reportGenerating, setReportGenerating] = useState(false);
@@ -255,7 +257,9 @@ const DoctorPatientView: React.FC = () => {
         setAiSearchLoading(true);
         try {
             const res = await documentsAPI.searchAI(patient.id, query);
-            setAiSearchResults(res.data || []);
+            // res.data now contains { query, answer, results }
+            setAiSearchResults(res.data.results || []);
+            setAiAnswer(res.data.answer || '');
         } catch (err) {
             console.error('AI Search error:', err);
             alert('Failed to perform semantic search.');
@@ -741,29 +745,48 @@ const DoctorPatientView: React.FC = () => {
                                             <input
                                                 className="flex-1 bg-gray-800 border-gray-700 text-white placeholder-gray-500 rounded-lg px-4 py-2 text-sm focus:ring-1 focus:ring-primary-500 outline-none"
                                                 placeholder="e.g. Find mention of previous cardiac surgeries or chronic conditions..."
+                                                value={aiSearchQuery}
+                                                onChange={(e) => setAiSearchQuery(e.target.value)}
                                                 onKeyDown={(e) => {
                                                     if (e.key === 'Enter') {
-                                                        handleAISearch((e.target as HTMLInputElement).value);
+                                                        handleAISearch(aiSearchQuery);
                                                     }
                                                 }}
                                             />
                                             <button
-                                                onClick={() => {
-                                                    const input = document.querySelector('input[placeholder*="cardiac surgeries"]') as HTMLInputElement;
-                                                    handleAISearch(input?.value);
-                                                }}
-                                                disabled={aiSearchLoading}
+                                                onClick={() => handleAISearch(aiSearchQuery)}
+                                                disabled={aiSearchLoading || !aiSearchQuery.trim()}
                                                 className="bg-primary-600 hover:bg-primary-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors disabled:opacity-50"
                                             >
                                                 {aiSearchLoading ? 'Searching...' : 'Search'}
                                             </button>
                                         </div>
 
-                                        <div className="space-y-3">
-                                            {aiSearchResults.length === 0 && !aiSearchLoading && (
+                                        <div className="space-y-4">
+                                            {aiAnswer && (
+                                                <div className="p-5 bg-gradient-to-r from-primary-900 to-indigo-900 rounded-xl border border-primary-500 shadow-lg animate-in fade-in zoom-in-95 duration-500">
+                                                    <div className="flex items-center gap-2 mb-3 text-primary-400">
+                                                        <Activity className="h-5 w-5 animate-pulse" />
+                                                        <h4 className="text-sm font-black uppercase tracking-widest">AI Synthesis</h4>
+                                                    </div>
+                                                    <p className="text-sm text-white leading-relaxed font-medium italic">
+                                                        "{aiAnswer}"
+                                                    </p>
+                                                    <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between">
+                                                        <span className="text-[10px] text-primary-300 font-bold uppercase tracking-tight">Verified against medical records</span>
+                                                        <span className="text-[10px] text-gray-400 italic">References below</span>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {aiSearchResults.length === 0 && !aiSearchLoading && !aiAnswer && (
                                                 <div className="p-3 bg-gray-800 rounded-lg border border-gray-700">
                                                     <p className="text-xs italic text-gray-400">Search results will appear here after searching indexed documents...</p>
                                                 </div>
+                                            )}
+
+                                            {aiSearchResults.length > 0 && (
+                                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest pl-1 mt-6 mb-2">Source References</p>
                                             )}
                                             {aiSearchResults.map((res, idx) => (
                                                 <div key={idx} className="p-4 bg-gray-800 rounded-lg border border-gray-700 border-l-4 border-l-primary-500 animate-in fade-in slide-in-from-left-2">
@@ -848,11 +871,11 @@ const DoctorPatientView: React.FC = () => {
                                                             <p className="text-[10px] font-black text-primary-600 uppercase mb-2 tracking-widest flex items-center gap-1">
                                                                 <CheckCircle className="h-3 w-3" /> AI Synthesized Insights
                                                             </p>
-                                                            <ul className="space-y-2">
-                                                                {report.report_data.ai_insights.slice(0, 2).map((insight: string, i: number) => (
-                                                                    <li key={i} className="text-xs text-gray-600 leading-relaxed ml-2 list-disc">{insight}</li>
-                                                                ))}
-                                                            </ul>
+                                                            <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-line">
+                                                                {typeof report.report_data.ai_insights === 'string'
+                                                                    ? report.report_data.ai_insights
+                                                                    : (report.report_data.ai_insights as string[]).join('\n')}
+                                                            </p>
                                                         </div>
                                                     )}
                                                 </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { documentsAPI } from '../services/api';
+import { documentsAPI, patientsAPI } from '../services/api';
 import { FileText, Upload, Trash2, Download, Search, File, CheckCircle, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import type { Document } from '../types';
@@ -11,15 +11,26 @@ const Documents: React.FC = () => {
     const [documentType, setDocumentType] = useState('medical_report');
     const [isLoading, setIsLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
+    const [patientId, setPatientId] = useState<string | null>(null);
 
     useEffect(() => {
-        loadDocuments();
+        const init = async () => {
+            try {
+                const profileRes = await patientsAPI.getMyProfile();
+                setPatientId(profileRes.data.id);
+                loadDocuments(profileRes.data.id);
+            } catch (error) {
+                console.error('Error loading profile:', error);
+                setIsLoading(false);
+            }
+        };
+        init();
     }, []);
 
-    const loadDocuments = async () => {
+    const loadDocuments = async (pId: string) => {
         try {
             setIsLoading(true);
-            const response = await documentsAPI.getAll();
+            const response = await documentsAPI.getAll(pId);
             setDocuments(response.data);
         } catch (error) {
             console.error('Error loading documents:', error);
@@ -34,10 +45,11 @@ const Documents: React.FC = () => {
 
         try {
             setIsLoading(true);
-            await documentsAPI.upload(file, documentType);
+            if (!patientId) throw new Error("Patient ID not found");
+            await documentsAPI.upload(patientId, file, documentType, true); // Set processVector=true
             setIsUploadOpen(false);
             setFile(null);
-            loadDocuments();
+            loadDocuments(patientId);
         } catch (error) {
             console.error('Upload error:', error);
         } finally {
@@ -47,9 +59,10 @@ const Documents: React.FC = () => {
 
     const handleDelete = async (id: string) => {
         if (!window.confirm('Are you sure you want to delete this document?')) return;
+        if (!patientId) return;
         try {
             await documentsAPI.delete(id);
-            loadDocuments();
+            loadDocuments(patientId);
         } catch (error) {
             console.error('Delete error:', error);
         }

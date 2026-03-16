@@ -93,7 +93,7 @@ export const diagnosisAPI = {
 
 // Documents API
 export const documentsAPI = {
-    getAll: () => api.get('/documents/'),
+    getAll: (patientId: string) => api.get(`/documents/patient/${patientId}`),
     upload: (patientId: string, file: File, type: string, processVector: boolean = false) => {
         const formData = new FormData();
         formData.append('file', file);

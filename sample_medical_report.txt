@@ -1,0 +1,17 @@
+Patient: John Doe
+Date: March 13, 2026
+Clinical Note:
+The patient presents with persistent sharp sub-sternal chest pain that radiates to the left arm, lasting approximately 15 minutes per episode. This is often triggered by physical exertion and relieved by rest or sublingual nitroglycerin. 
+
+Medical History:
+- History of hypertension (managed with Lisinopril 10mg)
+- Type 2 Diabetes (managed with Metformin)
+
+Lab Results:
+- Recent lipid profile shows elevated LDL at 160 mg/dL. 
+
+Diagnosis: 
+- Suspected Stable Angina Pectoris. 
+
+Plan: 
+- Referred for a Stress Thallium test and increase Lisinopril dosage.

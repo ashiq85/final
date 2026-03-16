@@ -105,36 +105,59 @@ async def generate_health_report(
         report_data=report_data
     )
     
-    # Optional: Mix in RAG insights
+    # Optional: Mix in RAG insights (with fallback to raw excerpts if LLM is unavailable)
     try:
         rag_results = await rag_service.query_patient_records(
-            patient_id, 
+            patient_id,
             "Provide a concise clinical narrative summary of this patient's medical history, focusing on chronic conditions, major surgeries, and recent significant findings. Format as a cohesive medical summary."
         )
         if rag_results and "documents" in rag_results and len(rag_results["documents"][0]) > 0:
-            # Synthesize raw document chunks into a cohesive narrative using LLM
-            llm = get_llm()
-            context = "\n\n".join(rag_results["documents"][0])
+            doc_chunks = rag_results["documents"][0]
+            context = "\n\n".join(doc_chunks)
             
-            # 1. Synthesize general 'Insights from Documents'
-            insight_prompt = f"You are a medical consultant. Synthesize these medical record excerpts into a concise, professional 'Insights from Documents' narrative summary.\n\nFindings:\n{context}\n\nProvide only the synthesized narrative summary."
-            ai_summary = await llm.ainvoke(insight_prompt)
-            report_data["ai_insights"] = ai_summary.content
-            
-            # 2. If medical_history is empty, also synthesize a specific history summary
-            if not report_data.get("medical_history") or len(report_data["medical_history"]) == 0:
-                history_prompt = f"You are a medical scribe. Based ONLY on the following medical record excerpts, write a concise bulleted medical history for this patient. If no history is found, return exactly the word 'NONE' and nothing else.\n\nExcerpts:\n{context}"
-                history_summary = await llm.ainvoke(history_prompt)
-                content = history_summary.content.strip()
-                if content != "NONE":
-                    synthesized_history = content.split('\n')
-                    # Filter out empty lines or preamble
-                    final_history = [h.strip().lstrip('*-• ') for h in synthesized_history if h.strip() and not h.lower().startswith('here is')]
-                    if final_history:
-                        report_data["medical_history"] = final_history
+            # Try AI synthesis first
+            try:
+                llm = get_llm()
                 
+                # 1. Synthesize general 'Insights from Documents'
+                insight_prompt = f"You are a medical consultant. Synthesize these medical record excerpts into a concise, professional 'Insights from Documents' narrative summary.\n\nFindings:\n{context}\n\nProvide only the synthesized narrative summary."
+                ai_summary = await llm.ainvoke(insight_prompt)
+                report_data["ai_insights"] = ai_summary.content
+                print(f"[RAG] AI synthesis succeeded for report of patient {patient_id}")
+                
+                # 2. If medical_history is empty, also synthesize a specific history summary
+                if not report_data.get("medical_history") or len(report_data["medical_history"]) == 0:
+                    history_prompt = f"You are a medical scribe. Based ONLY on the following medical record excerpts, write a concise bulleted medical history for this patient. If no history is found, return exactly the word 'NONE' and nothing else.\n\nExcerpts:\n{context}"
+                    history_summary = await llm.ainvoke(history_prompt)
+                    content = history_summary.content.strip()
+                    if content != "NONE":
+                        synthesized_history = content.split('\n')
+                        # Filter out empty lines or preamble
+                        final_history = [h.strip().lstrip('*-• ') for h in synthesized_history if h.strip() and not h.lower().startswith('here is')]
+                        if final_history:
+                            report_data["medical_history"] = final_history
+
+            except Exception as llm_error:
+                # LLM failed (quota, model not found, etc.) — fall back to raw document excerpts
+                err_msg = str(llm_error).lower()
+                print(f"[RAG] LLM synthesis failed for report (will use excerpts): {llm_error}")
+                
+                # Build a clean excerpt from the top retrieved chunks
+                all_text = " ".join(doc_chunks[:3])
+                excerpt = all_text[:1200].strip() + ("..." if len(all_text) > 1200 else "")
+                
+                if "resource_exhausted" in err_msg or "429" in err_msg:
+                    note = "Note: AI synthesis unavailable (API quota reached). Showing relevant document excerpts:\n\n"
+                elif "not_found" in err_msg or "404" in err_msg:
+                    note = "Note: AI model not found. Showing relevant document excerpts:\n\n"
+                else:
+                    note = "Note: AI synthesis failed. Showing relevant document excerpts:\n\n"
+                
+                report_data["ai_insights"] = note + excerpt
+
             # Update report_data in the model
             health_report.report_data = report_data
+
     except Exception as e:
         print(f"RAG insights gathering failed for report: {e}")
 

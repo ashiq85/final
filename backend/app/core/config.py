@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     # Google Gemini (AI Studio)
     GOOGLE_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_MODEL: str = "gemini-2.0-flash"
     
     # ChromaDB
     CHROMA_PERSIST_DIRECTORY: str = "./chroma_data"
