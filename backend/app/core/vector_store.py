@@ -37,4 +37,9 @@ class VectorStore:
     def delete_collection(self, name: str):
         self.client.delete_collection(name)
 
+    def delete_from_collection(self, collection_name: str, where: Dict[str, Any]):
+        """Delete items from a collection based on a filter"""
+        collection = self.get_or_create_collection(collection_name)
+        collection.delete(where=where)
+
 vector_store = VectorStore()

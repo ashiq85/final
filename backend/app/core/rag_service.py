@@ -49,4 +49,16 @@ class RAGService:
             print(f"DEBUG: RAG search failed for patient {patient_id}: {e}")
             return {"documents": [[]], "metadatas": [[]]}
 
+    async def delete_patient_document(self, patient_id: str, document_id: str):
+        """Remove all vector chunks associated with a document"""
+        try:
+            vector_store.delete_from_collection(
+                collection_name=f"patient_{patient_id}",
+                where={"document_id": document_id}
+            )
+            return True
+        except Exception as e:
+            print(f"DEBUG: Failed to delete vector data for doc {document_id}: {e}")
+            return False
+
 rag_service = RAGService()

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { documentsAPI, patientsAPI } from '../services/api';
-import { FileText, Upload, Trash2, Download, Search, File, CheckCircle, Clock } from 'lucide-react';
+import { FileText, Upload, Trash2, Download, Search, File, CheckCircle, Clock, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import type { Document } from '../types';
 
@@ -55,6 +55,25 @@ const Documents: React.FC = () => {
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const handleDownload = async (doc: Document) => {
+        try {
+            const downloadUrl = documentsAPI.getDownloadURL(doc.id);
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.setAttribute('download', doc.filename);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        } catch (error) {
+            console.error('Download error:', error);
+        }
+    };
+
+    const handleView = (doc: Document) => {
+        const viewUrl = documentsAPI.getViewingURL(doc.id);
+        window.open(viewUrl, '_blank');
     };
 
     const handleDelete = async (id: string) => {
@@ -205,7 +224,18 @@ const Documents: React.FC = () => {
                                         </div>
                                     </div>
                                     <div className="flex space-x-2">
-                                        <button className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all" title="Download">
+                                        <button 
+                                            onClick={() => handleView(doc)}
+                                            className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all" 
+                                            title="View Inline"
+                                        >
+                                            <Eye className="h-5 w-5" />
+                                        </button>
+                                        <button 
+                                            onClick={() => handleDownload(doc)}
+                                            className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all" 
+                                            title="Download"
+                                        >
                                             <Download className="h-5 w-5" />
                                         </button>
                                         <button
@@ -221,7 +251,9 @@ const Documents: React.FC = () => {
                                     <div className="px-6 pb-4 ml-16">
                                         <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 border border-gray-100">
                                             <span className="font-bold text-primary-700 mr-2 uppercase tracking-tighter">AI Summary:</span>
-                                            {JSON.stringify(doc.extracted_data).substring(0, 150)}...
+                                            {typeof doc.extracted_data === 'string' 
+                                                ? doc.extracted_data 
+                                                : (doc.extracted_data.summary || JSON.stringify(doc.extracted_data).substring(0, 150) + '...')}
                                         </div>
                                     </div>
                                 )}

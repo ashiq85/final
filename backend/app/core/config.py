@@ -17,9 +17,16 @@ class Settings(BaseSettings):
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:3001", "http://localhost:5173"]
     
+    # LLM Settings
+    LLM_PROVIDER: str = "gemini"  # or "ollama"
+    
     # Google Gemini (AI Studio)
     GOOGLE_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+    
+    # Ollama Configuration
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama2"
     
     # ChromaDB
     CHROMA_PERSIST_DIRECTORY: str = "./chroma_data"
@@ -40,6 +47,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+import os
+print(f"DEBUG_CONFIG: os.environ.get('GEMINI_MODEL') = {os.environ.get('GEMINI_MODEL')}")
+print(f"DEBUG_CONFIG: settings.GEMINI_MODEL = {settings.GEMINI_MODEL}")
 
 # Export sensitive keys to os.environ so tools/libraries like CrewAI/LiteLLM can see them
 import os
@@ -47,4 +57,10 @@ if settings.GOOGLE_API_KEY:
     os.environ["GOOGLE_API_KEY"] = settings.GOOGLE_API_KEY
 if settings.GEMINI_MODEL:
     os.environ["GEMINI_MODEL"] = settings.GEMINI_MODEL
+if settings.LLM_PROVIDER:
+    os.environ["LLM_PROVIDER"] = settings.LLM_PROVIDER
+if settings.OLLAMA_BASE_URL:
+    os.environ["OLLAMA_BASE_URL"] = settings.OLLAMA_BASE_URL
+if settings.OLLAMA_MODEL:
+    os.environ["OLLAMA_MODEL"] = settings.OLLAMA_MODEL
 

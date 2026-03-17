@@ -16,6 +16,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Create FastAPI app
+# FORCE OVERRIDE for the persistent 404 issue
+import os
+if os.environ.get("GEMINI_MODEL") == "gemini-1.5-flash":
+    os.environ["GEMINI_MODEL"] = "gemini-2.5-flash"
+    
+settings.GEMINI_MODEL = "gemini-2.5-flash"
+print(f"DEBUG_MAIN: settings.GEMINI_MODEL is now: {settings.GEMINI_MODEL}")
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
@@ -27,7 +35,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,6 +56,7 @@ app.include_router(reports.router, prefix="/api")
 
 # Mount static files
 os.makedirs("app/static/reports", exist_ok=True)
+os.makedirs("app/static/uploads", exist_ok=True)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 

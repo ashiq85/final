@@ -142,18 +142,15 @@ async def generate_health_report(
                 err_msg = str(llm_error).lower()
                 print(f"[RAG] LLM synthesis failed for report (will use excerpts): {llm_error}")
                 
-                # Build a clean excerpt from the top retrieved chunks
-                all_text = " ".join(doc_chunks[:3])
-                excerpt = all_text[:1200].strip() + ("..." if len(all_text) > 1200 else "")
-                
+                # Build a brief note if AI fails
                 if "resource_exhausted" in err_msg or "429" in err_msg:
-                    note = "Note: AI synthesis unavailable (API quota reached). Showing relevant document excerpts:\n\n"
+                    note = "AI synthesis unavailable (API quota reached)."
                 elif "not_found" in err_msg or "404" in err_msg:
-                    note = "Note: AI model not found. Showing relevant document excerpts:\n\n"
+                    note = "AI model not found. Please check configuration."
                 else:
-                    note = "Note: AI synthesis failed. Showing relevant document excerpts:\n\n"
+                    note = "AI synthesis failed for this report."
                 
-                report_data["ai_insights"] = note + excerpt
+                report_data["ai_insights"] = note
 
             # Update report_data in the model
             health_report.report_data = report_data

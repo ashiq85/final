@@ -30,6 +30,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             baseNav = [
                 { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
                 { name: 'Patient Records', href: '/doctor/patients', icon: Users },
+                { name: 'Add New Patient', href: '/patients', icon: Users },
                 { name: 'Appointments', href: '/appointments', icon: Calendar },
             ];
         } else {

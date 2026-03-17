@@ -4,7 +4,7 @@ import api from '../services/api';
 import {
     Search, User, FileText, Activity, Calendar,
     Pill, PlusCircle, Info,
-    X, CheckCircle, AlertCircle, Bed
+    X, CheckCircle, AlertCircle, Bed, Eye, Download, Trash2
 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -212,6 +212,32 @@ const DoctorPatientView: React.FC = () => {
         } finally {
             setUploading(false);
             e.target.value = ''; // Reset input
+        }
+    };
+
+    const handleDocumentView = (doc: any) => {
+        const viewUrl = documentsAPI.getViewingURL(doc.id);
+        window.open(viewUrl, '_blank');
+    };
+
+    const handleDocumentDownload = (doc: any) => {
+        const downloadUrl = documentsAPI.getDownloadURL(doc.id);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.setAttribute('download', doc.filename);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+    };
+
+    const handleDocumentDelete = async (docId: string) => {
+        if (!window.confirm('Are you sure you want to delete this document?')) return;
+        try {
+            await documentsAPI.delete(docId);
+            setPatientDocuments(prev => prev.filter(d => d.id !== docId));
+        } catch (err) {
+            console.error('Delete error:', err);
+            alert('Failed to delete document.');
         }
     };
 
@@ -728,6 +754,29 @@ const DoctorPatientView: React.FC = () => {
                                                             </div>
                                                         </div>
                                                     </div>
+                                                    <div className="flex items-center gap-1">
+                                                        <button
+                                                            onClick={() => handleDocumentView(doc)}
+                                                            className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all"
+                                                            title="View"
+                                                        >
+                                                            <Eye className="h-4 w-4" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDocumentDownload(doc)}
+                                                            className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all"
+                                                            title="Download"
+                                                        >
+                                                            <Download className="h-4 w-4" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDocumentDelete(doc.id)}
+                                                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                                            title="Delete"
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             ))}
                                         </div>
@@ -788,15 +837,14 @@ const DoctorPatientView: React.FC = () => {
                                             {aiSearchResults.length > 0 && (
                                                 <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest pl-1 mt-6 mb-2">Source References</p>
                                             )}
-                                            {aiSearchResults.map((res, idx) => (
-                                                <div key={idx} className="p-4 bg-gray-800 rounded-lg border border-gray-700 border-l-4 border-l-primary-500 animate-in fade-in slide-in-from-left-2">
-                                                    <div className="flex justify-between items-start mb-2">
-                                                        <span className="text-[10px] font-black uppercase text-primary-400 bg-primary-900/50 px-2 py-0.5 rounded">Result {idx + 1}</span>
-                                                        <span className="text-[10px] text-gray-500 italic">{res.metadata?.filename || 'Unknown Document'}</span>
+                                            <div className="flex flex-wrap gap-3 mt-2 mb-4">
+                                                {Array.from(new Set(aiSearchResults.map(res => res.metadata?.filename || 'Untitled Document'))).map((filename, idx) => (
+                                                    <div key={idx} className="flex items-center gap-2 px-3 py-2 bg-gray-800 rounded-lg border border-gray-700 border-l-4 border-l-primary-500 shadow-lg animate-in fade-in slide-in-from-left-2 transition-all hover:bg-gray-750">
+                                                        <FileText className="h-3.5 w-3.5 text-primary-500" />
+                                                        <span className="text-xs font-bold text-white tracking-tight">{filename}</span>
                                                     </div>
-                                                    <p className="text-sm text-gray-200 leading-relaxed">"{res.content}"</p>
-                                                </div>
-                                            ))}
+                                                ))}
+                                            </div>
                                         </div>
 
                                         <div className="mt-8 pt-6 border-t border-gray-800">

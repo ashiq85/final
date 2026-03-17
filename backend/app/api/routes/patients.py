@@ -351,7 +351,9 @@ async def doctor_create_patient(
             )
             firebase_uid = firebase_user.uid
     except Exception as e:
+        import traceback
         logger.error(f"Failed to create Firebase Auth user: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create Firebase authentication account: {str(e)}"
@@ -504,8 +506,27 @@ def log_health_metric(
 
 
 def _generate_health_analysis(db: Any, patient_id: str, metric_name: str, value: float, unit: str):
-    """Generate AI analysis for a newly logged health metric (runs in threadpool via BackgroundTasks)"""
+    """Generate AI analysis for a newly logged health metric (runs in threadpool via BackgroundTasks).
+    Only fires LLM call when the metric is out of normal range to preserve API quota.
+    """
     try:
+        # --- Guard: skip LLM for routine/normal values to protect quota ---
+        normal_ranges = {
+            "blood_pressure_systolic": (90, 140),
+            "blood_pressure_diastolic": (60, 90),
+            "heart_rate": (50, 100),
+            "temperature": (36.1, 37.5),   # Celsius
+            "oxygen_saturation": (95, 100),
+            "blood_glucose": (70, 140),
+            "bmi": (18.5, 30),
+        }
+        metric_key = metric_name.lower().replace(" ", "_")
+        if metric_key in normal_ranges:
+            lo, hi = normal_ranges[metric_key]
+            if lo <= value <= hi:
+                logger.info(f"Skipping AI health analysis for {metric_name}={value} (within normal range)")
+                return
+        
         # Fetch patient info for context
         p_doc = db.collection("patients").document(patient_id).get()
         p_data = p_doc.to_dict() if p_doc.exists else {}
@@ -557,6 +578,7 @@ def _generate_health_analysis(db: Any, patient_id: str, metric_name: str, value:
         
     except Exception as e:
         logger.error(f"Failed to generate health analysis: {e}")
+
 
 
 @router.get("/{patient_id}/medical-records", response_model=List[Dict[str, Any]])

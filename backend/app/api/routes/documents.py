@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Query
+from fastapi.responses import FileResponse, StreamingResponse
 from typing import List, Any, Optional
 from app.db.base import get_db
 from app.db.models import Document, User, Patient, UserRole
@@ -12,7 +13,7 @@ from datetime import datetime
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
-UPLOAD_DIR = "app/uploads"
+UPLOAD_DIR = "app/static/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
@@ -56,6 +57,8 @@ async def upload_document(
 
     # Optional: Vector indexing (RAG)
     chunks_processed = 0
+    ai_summary_text = ""
+    
     if process_vector:
         try:
             text_content = ""
@@ -65,40 +68,43 @@ async def upload_document(
             if ct in ["text/plain", "text/markdown", "application/json"] or fname_lower.endswith(('.txt', '.md', '.json')):
                 text_content = content.decode("utf-8", errors="ignore")
             elif ct == "application/pdf" or fname_lower.endswith('.pdf'):
-                # Use PyMuPDF for robust extraction
-                import fitz  # pyMuPDF
                 doc = fitz.open(stream=content, filetype="pdf")
                 text_content = ""
                 for page in doc:
                     text_content += page.get_text() + "\n"
                 doc.close()
-                print(f"[RAG] Extracted {len(text_content)} chars from PDF '{file.filename}'")
-            else:
-                print(f"[RAG] Unsupported file type for vectorization: content_type={ct}, filename={file.filename}")
             
             if text_content and text_content.strip():
+                # Generate AI Summary
+                try:
+                    llm = get_llm()
+                    summary_prompt = f"Summarize the following medical document in 1-2 concise sentences. Focus on the core findings.\n\nDocument Text:\n{text_content[:4000]}"
+                    ai_resp = await llm.ainvoke(summary_prompt)
+                    ai_summary_text = ai_resp.content.strip()
+                except Exception as summ_err:
+                    print(f"[RAG] Summary generation failed: {summ_err}")
+                    ai_summary_text = text_content[:200] + "..."
+
                 chunks_processed = await rag_service.process_document(
                     patient_id=patient_id,
                     document_id=doc_ref.id,
                     content=text_content,
                     metadata={"filename": file.filename, "type": document_type}
                 )
-                doc_ref.update({"is_vectorized": True, "chunks_count": chunks_processed})
-                print(f"[RAG] Successfully indexed {chunks_processed} chunks for document '{file.filename}'")
-            else:
-                print(f"[RAG] Warning: No text extracted from '{file.filename}' (content_type={ct})")
+                doc_ref.update({
+                    "is_vectorized": True, 
+                    "chunks_count": chunks_processed,
+                    "extracted_data": {"summary": ai_summary_text}
+                })
         except Exception as e:
-            # Don't fail the whole upload if vectorization fails
-            import traceback
-            print(f"[RAG] Vectorization failed for '{file.filename}': {e}")
-            traceback.print_exc()
+            print(f"[RAG] Vectorization failed: {e}")
 
     return {
         "id": doc_ref.id, 
         "filename": file.filename, 
         "message": "Document uploaded successfully",
         "vectorized": process_vector and chunks_processed > 0,
-        "chunks": chunks_processed
+        "summary": ai_summary_text
     }
 
 
@@ -163,21 +169,22 @@ async def search_patient_documents(
     # AI Synthesis: Answer the user query using the retrieved context
     answer = ""
     if formatted_results:
+        # Optimization: Use top 3 results for synthesis to reduce latency/tokens
+        top_results = formatted_results[:3]
+        context_text = "\n".join([f"DOC: {r['metadata'].get('filename', 'Unknown')} > {r['content'][:400]}" for r in top_results])
+        
         try:
-            context_text = "\n\n".join([f"Source {i+1}:\n{r['content']}" for i, r in enumerate(formatted_results[:3])])
-            prompt = f"""You are a medical assistant reviewing a patient's records. 
-            Based ONLY on the following snippets from the patient's documents, answer the user's question concisely.
-            If the answer is not in the context, say you don't have enough information.
+            prompt = f"""Synthesize a brief clinical answer (max 3 sentences) from these record snippets.
             
-            Context:
+            CONTEXT:
             {context_text}
             
-            Question: {query}
+            QUERY: {query}
             
-            Answer:"""
+            ANSWER (Formal & Precise):"""
             
             llm = get_llm()
-            response = llm.invoke(prompt)
+            response = await llm.ainvoke(prompt)
             answer = response.content.strip()
             print(f"DEBUG: AI Search Synthesis Success")
         except ValueError as e:
@@ -233,30 +240,94 @@ def get_document(
 
 
 @router.delete("/{document_id}")
-def delete_document(
+async def delete_document(
     document_id: str,
     db: Any = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Delete a document"""
+    """Delete a document and its vector embeddings"""
     doc_ref = db.collection("documents").document(document_id)
     doc = doc_ref.get()
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Document not found")
 
     data = doc.to_dict()
+    patient_id = data.get("patient_id")
 
-    if current_user.role == UserRole.DOCTOR:
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # Doctors can delete if they have patient access (implied by patient existence check for now)
+    if current_user.role == UserRole.PATIENT:
+        if data.get("user_id") != current_user.id:
+            # Patient can only delete their own
+            patient_doc = db.collection("patients").document(patient_id).get()
+            if not patient_doc.exists or patient_doc.to_dict().get("user_id") != current_user.id:
+                raise HTTPException(status_code=403, detail="Not authorized")
 
+    # 1. Delete from vector store
+    if data.get("is_vectorized"):
+        await rag_service.delete_patient_document(patient_id, document_id)
+
+    # 2. Delete from filesystem
+    file_path = data.get("file_path")
+    if file_path and os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            print(f"Error removing file {file_path}: {e}")
+
+    # 3. Delete from Firestore
+    doc_ref.delete()
+    return {"message": "Document and associated AI data deleted successfully"}
+
+
+@router.get("/{document_id}/view")
+async def view_document(
+    document_id: str,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Serve a document for inline viewing"""
+    doc = db.collection("documents").document(document_id).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    data = doc.to_dict()
+    # auth check
     if current_user.role == UserRole.PATIENT:
         patient_doc = db.collection("patients").document(data.get("patient_id", "")).get()
         if not patient_doc.exists or patient_doc.to_dict().get("user_id") != current_user.id:
             raise HTTPException(status_code=403, detail="Not authorized")
 
     file_path = data.get("file_path")
-    if file_path and os.path.exists(file_path):
-        os.remove(file_path)
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    
+    return FileResponse(file_path, media_type=data.get("file_type", "application/octet-stream"))
 
-    doc_ref.delete()
-    return {"message": "Document deleted successfully"}
+
+@router.get("/{document_id}/download")
+async def download_document(
+    document_id: str,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Serve a document for forced download"""
+    doc = db.collection("documents").document(document_id).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    data = doc.to_dict()
+    # auth check
+    if current_user.role == UserRole.PATIENT:
+        patient_doc = db.collection("patients").document(data.get("patient_id", "")).get()
+        if not patient_doc.exists or patient_doc.to_dict().get("user_id") != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    file_path = data.get("file_path")
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    
+    return FileResponse(
+        file_path, 
+        media_type=data.get("file_type", "application/octet-stream"),
+        filename=data.get("filename")
+    )

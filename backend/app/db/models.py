@@ -66,9 +66,9 @@ class Patient(FirestoreModel):
     weight: Optional[float] = None
     emergency_contact: Optional[str] = None
     emergency_phone: Optional[str] = None
-    medical_history: Optional[List[Dict[str, Any]]] = None
-    allergies: Optional[List[str]] = None
-    current_medications: Optional[List[str]] = None
+    medical_history: List[Dict[str, Any]] = Field(default_factory=list)
+    allergies: List[str] = Field(default_factory=list)
+    current_medications: List[str] = Field(default_factory=list)
     medical_id: Optional[str] = None
     primary_doctor_id: Optional[str] = None
     email: Optional[str] = None
@@ -93,12 +93,12 @@ class MedicalRecord(FirestoreModel):
     patient_id: str
     visit_date: datetime
     chief_complaint: Optional[str] = None
-    symptoms: List[str] = []
-    vitals: Dict[str, Any] = {}
+    symptoms: List[str] = Field(default_factory=list)
+    vitals: Dict[str, Any] = Field(default_factory=dict)
     diagnosis: Optional[str] = None
     treatment_plan: Optional[str] = None
-    prescriptions: List[Dict[str, Any]] = []
-    lab_results: List[Dict[str, Any]] = []
+    prescriptions: List[Dict[str, Any]] = Field(default_factory=list)
+    lab_results: List[Dict[str, Any]] = Field(default_factory=list)
     created_by: str
 
 
