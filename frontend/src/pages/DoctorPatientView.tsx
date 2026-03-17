@@ -9,6 +9,8 @@ import {
 import { format, isValid } from 'date-fns';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { reportsAPI, documentsAPI } from '../services/api';
+import CommunicationModal from '../components/CommunicationModal';
+import { Send } from 'lucide-react';
 
 const safeFormat = (dateStr: any, formatStr: string) => {
     if (!dateStr) return '—';
@@ -81,6 +83,10 @@ const DoctorPatientView: React.FC = () => {
     const [aiSearchLoading, setAiSearchLoading] = useState(false);
     const [patientReports, setPatientReports] = useState<any[]>([]);
     const [reportGenerating, setReportGenerating] = useState(false);
+    const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
+
+    // Communication state
+    const [isCommunicationModalOpen, setIsCommunicationModalOpen] = useState(false);
 
     React.useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -186,6 +192,23 @@ const DoctorPatientView: React.FC = () => {
             alert('Failed to save IP record.');
         } finally {
             setIpSubmitting(false);
+        }
+    };
+
+    const handleDischargeIP = async (recordId: string) => {
+        if (!patient || !window.confirm('Are you sure you want to discharge this patient?')) return;
+        
+        try {
+            const res = await patientsAPI.updateIPRecord(patient.id, recordId, {
+                status: 'discharged',
+                discharge_date: new Date().toISOString()
+            });
+            // Update local state
+            setIpHistory(prev => prev.map(rec => rec.id === recordId ? res.data : rec));
+            alert('Patient discharged successfully!');
+        } catch (err) {
+            console.error('Discharge error:', err);
+            alert('Failed to discharge patient.');
         }
     };
 
@@ -309,6 +332,20 @@ const DoctorPatientView: React.FC = () => {
         }
     };
 
+    const handleDeleteReport = async (reportId: string) => {
+        if (!window.confirm("Are you sure you want to delete this report?")) return;
+        
+        try {
+            await reportsAPI.delete(reportId);
+            setPatientReports(prev => prev.filter(r => r.id !== reportId));
+            if (expandedReportId === reportId) setExpandedReportId(null);
+            alert("Report deleted successfully");
+        } catch (err) {
+            console.error('Delete report error:', err);
+            alert('Failed to delete report.');
+        }
+    };
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -328,6 +365,13 @@ const DoctorPatientView: React.FC = () => {
                         >
                             <PlusCircle className="h-5 w-5" />
                             <span>Start Clinical Encounter</span>
+                        </button>
+                        <button
+                            onClick={() => setIsCommunicationModalOpen(true)}
+                            className="btn-secondary flex items-center gap-2 ml-2"
+                        >
+                            <Send className="h-5 w-5" />
+                            <span>Message Patient</span>
                         </button>
                     </div>
                 )}
@@ -526,7 +570,17 @@ const DoctorPatientView: React.FC = () => {
                                                             {ip.status === 'admitted' ? '🏥 Admitted' : '✓ Discharged'}
                                                         </span>
                                                     </div>
-                                                    <span className="text-xs text-gray-400">{safeFormat(ip.admission_date, 'dd MMM yyyy')}</span>
+                                                    <div className="flex items-center gap-3">
+                                                        {ip.status === 'admitted' && (
+                                                            <button
+                                                                onClick={() => handleDischargeIP(ip.id!)}
+                                                                className="text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded shadow-sm"
+                                                            >
+                                                                Discharge Patient
+                                                            </button>
+                                                        )}
+                                                        <span className="text-xs text-gray-400">{safeFormat(ip.admission_date, 'dd MMM yyyy')}</span>
+                                                    </div>
                                                 </div>
                                                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-gray-600">
                                                     {ip.ward && <span><strong>Ward:</strong> {ip.ward}</span>}
@@ -906,15 +960,29 @@ const DoctorPatientView: React.FC = () => {
                                                                 <p className="text-xs text-gray-500">{safeFormat(report.created_at, 'dd MMMM yyyy, HH:mm')}</p>
                                                             </div>
                                                         </div>
-                                                        <button
-                                                            onClick={() => reportsAPI.downloadPDF(report.id)}
-                                                            className="text-xs font-bold text-primary-600 hover:text-primary-700 bg-primary-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
-                                                        >
-                                                            <Activity className="h-3 w-3" /> Download PDF
-                                                        </button>
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                onClick={() => setExpandedReportId(expandedReportId === report.id ? null : report.id)}
+                                                                className="text-xs font-bold text-gray-600 hover:text-gray-900 bg-gray-100 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                                                            >
+                                                                {expandedReportId === report.id ? "Hide Details" : "View Details"}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => reportsAPI.downloadPDF(report.id)}
+                                                                className="text-xs font-bold text-primary-600 hover:text-primary-700 bg-primary-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                                                            >
+                                                                <FileText className="h-3 w-3" /> PDF
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleDeleteReport(report.id)}
+                                                                className="text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        </div>
                                                     </div>
 
-                                                    {report.report_data?.ai_insights && (
+                                                    {expandedReportId === report.id && report.report_data?.ai_insights && (
                                                         <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
                                                             <p className="text-[10px] font-black text-primary-600 uppercase mb-2 tracking-widest flex items-center gap-1">
                                                                 <CheckCircle className="h-3 w-3" /> AI Synthesized Insights
@@ -936,6 +1004,14 @@ const DoctorPatientView: React.FC = () => {
                     </div>
                 </div>
             )}
+            
+            {/* Communication Modal */}
+            <CommunicationModal
+                isOpen={isCommunicationModalOpen}
+                onClose={() => setIsCommunicationModalOpen(false)}
+                recipientId={patient?.user_id || null}
+                recipientName={patient?.user?.full_name || null}
+            />
         </div>
     );
 };

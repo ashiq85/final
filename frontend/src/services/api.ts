@@ -58,6 +58,7 @@ export const patientsAPI = {
     getMedicalRecords: (patientId: string) => api.get<any[]>(`/patients/${patientId}/medical-records`),
     getMedications: (patientId: string) => api.get<any[]>(`/patients/${patientId}/medications`),
     searchRecords: (patientId: string, query: string) => api.get(`/patients/${patientId}/search-records`, { params: { query } }),
+    updateIPRecord: (patientId: string, recordId: string, data: any) => api.put(`/patients/${patientId}/ip-records/${recordId}`, data),
 };
 
 // Appointments API
@@ -122,6 +123,7 @@ export const reportsAPI = {
                 document.body.appendChild(link);
                 link.click();
             }),
+    delete: (reportId: string) => api.delete(`/reports/${reportId}`),
 };
 
 // Admin API
@@ -149,6 +151,8 @@ export const communicationsAPI = {
     markAsRead: (messageId: string) => api.put(`/communications/${messageId}/read`),
     getNotifications: (userId: string) => api.get<any[]>(`/communications/notifications/${userId}`),
     markNotificationRead: (id: string) => api.put(`/communications/notifications/${id}/read`),
+    getSent: () => api.get<any[]>('/communications/sent/all'),
+    getThread: (otherUserId: string) => api.get<any[]>(`/communications/thread/${otherUserId}`),
 };
 
 // Feedback API

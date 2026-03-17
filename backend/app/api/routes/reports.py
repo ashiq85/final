@@ -120,14 +120,37 @@ async def generate_health_report(
                 llm = get_llm()
                 
                 # 1. Synthesize general 'Insights from Documents'
-                insight_prompt = f"You are a medical consultant. Synthesize these medical record excerpts into a concise, professional 'Insights from Documents' narrative summary.\n\nFindings:\n{context}\n\nProvide only the synthesized narrative summary."
+                metrics_context = "\n".join([f"- {m['recorded_at'][:10]} {m['metric']}: {m['value']} {m['unit']}" for m in report_data.get("health_metrics", [])[:5]])
+                history_context = ", ".join(report_data.get("medical_history", []))
+                
+                insight_prompt = f"""You are a senior medical consultant. Synthesize a professional 'Comprehensive Health Assessment' for the patient '{patient_name}'.
+
+PATIENT PROFILE:
+- Name: {patient_name}
+- Medical History: {history_context}
+- Recent Metrics:
+{metrics_context}
+
+DOCUMENT EXCERPTS (FOR CONTEXT):
+{context}
+
+INSIGHTS_INSTRUCTIONS:
+1. Provide a cohesive, professional clinical narrative summarizing the patient's status.
+2. Integrate and reconcile findings from the excerpts with the patient's known history and recent metrics. 
+3. TRUST that all provided document excerpts belong to the patient '{patient_name}', even if they mention different names (e.g., 'John Doe') or placeholders. Assume these are the patient's records.
+4. If there are conflicting findings, note them professionally.
+5. Include a 'Clinical Assessment' and 'Recommended Next Steps' section.
+6. Keep it concise but thorough.
+
+Provide only the synthesized assessment. Match the patient's name as '{patient_name}' in your final output. """
+                
                 ai_summary = await llm.ainvoke(insight_prompt)
                 report_data["ai_insights"] = ai_summary.content
                 print(f"[RAG] AI synthesis succeeded for report of patient {patient_id}")
                 
                 # 2. If medical_history is empty, also synthesize a specific history summary
                 if not report_data.get("medical_history") or len(report_data["medical_history"]) == 0:
-                    history_prompt = f"You are a medical scribe. Based ONLY on the following medical record excerpts, write a concise bulleted medical history for this patient. If no history is found, return exactly the word 'NONE' and nothing else.\n\nExcerpts:\n{context}"
+                    history_prompt = f"You are a medical scribe. Based on the following medical record excerpts, write a concise bulleted medical history for the patient '{patient_name}'. NOTE: Trust that these excerpts belong to this patient even if names like 'John Doe' appear. Extract chronic conditions, surgeries, and significant past diagnoses. If NO relevant medical history is found at all, return exactly the word 'NONE' and nothing else.\n\nExcerpts:\n{context}"
                     history_summary = await llm.ainvoke(history_prompt)
                     content = history_summary.content.strip()
                     if content != "NONE":
@@ -256,3 +279,39 @@ def download_report_pdf(
         raise HTTPException(status_code=404, detail="PDF not generated yet")
 
     return FileResponse(pdf_path, media_type="application/pdf", filename=f"health_report_{report_id}.pdf")
+
+@router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_report(
+    report_id: str,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a specific health report"""
+    doc_ref = db.collection("health_reports").document(report_id)
+    doc = doc_ref.get()
+    
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    data = doc.to_dict()
+
+    if current_user.role == UserRole.PATIENT:
+        # Check authorization (if we want patients to delete their own reports, or maybe only doctors should)
+        patient_doc = db.collection("patients").document(data.get("patient_id", "")).get()
+        if not patient_doc.exists or patient_doc.to_dict().get("user_id") != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+    elif current_user.role != UserRole.DOCTOR and current_user.role != UserRole.ADMIN:
+         raise HTTPException(status_code=403, detail="Not authorized to delete reports")
+
+    # Optional: Delete the PDF file from the server if it exists
+    pdf_path = data.get("pdf_path")
+    if pdf_path and os.path.exists(pdf_path):
+        try:
+            os.remove(pdf_path)
+            print(f"Deleted report PDF: {pdf_path}")
+        except Exception as e:
+            print(f"Failed to delete report PDF {pdf_path}: {e}")
+
+    # Delete the document from Firestore
+    doc_ref.delete()
+    return None
