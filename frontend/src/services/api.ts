@@ -105,6 +105,7 @@ export const documentsAPI = {
     },
     delete: (id: string) => api.delete(`/documents/${id}`),
     searchAI: (patientId: string, query: string) => api.get(`/documents/search/${patientId}`, { params: { query } }),
+    view: (id: string) => api.get(`/documents/${id}/view`, { responseType: 'blob' }),
     getViewingURL: (id: string) => `${api.defaults.baseURL}/documents/${id}/view`,
     getDownloadURL: (id: string) => `${api.defaults.baseURL}/documents/${id}/download`,
 };

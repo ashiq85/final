@@ -238,9 +238,16 @@ const DoctorPatientView: React.FC = () => {
         }
     };
 
-    const handleDocumentView = (doc: any) => {
-        const viewUrl = documentsAPI.getViewingURL(doc.id);
-        window.open(viewUrl, '_blank');
+    const handleDocumentView = async (doc: any) => {
+        try {
+            const response = await documentsAPI.view(doc.id);
+            const blob = new Blob([response.data], { type: response.headers['content-type'] });
+            const viewUrl = window.URL.createObjectURL(blob);
+            window.open(viewUrl, '_blank');
+        } catch (error) {
+            console.error('View error:', error);
+            alert("Failed to open document. Please try downloading it instead.");
+        }
     };
 
     const handleDocumentDownload = (doc: any) => {

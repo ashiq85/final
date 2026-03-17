@@ -71,9 +71,18 @@ const Documents: React.FC = () => {
         }
     };
 
-    const handleView = (doc: Document) => {
-        const viewUrl = documentsAPI.getViewingURL(doc.id);
-        window.open(viewUrl, '_blank');
+    const handleView = async (doc: Document) => {
+        try {
+            const response = await documentsAPI.view(doc.id);
+            const blob = new Blob([response.data], { type: response.headers['content-type'] });
+            const viewUrl = window.URL.createObjectURL(blob);
+            window.open(viewUrl, '_blank');
+            // Note: we don't revoke the ObjectURL immediately because the new tab needs time to load it. 
+            // The browser will clean it up when it closes.
+        } catch (error) {
+            console.error('View error:', error);
+            alert("Failed to open document. Please try downloading it instead.");
+        }
     };
 
     const handleDelete = async (id: string) => {
