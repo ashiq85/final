@@ -64,7 +64,7 @@ class Patient(FirestoreModel):
     address: Optional[str] = None
     height: Optional[float] = None
     weight: Optional[float] = None
-    emergency_contact: Optional[str] = None
+    emergency_contact: Optional[Dict[str, Any]] = None
     emergency_phone: Optional[str] = None
     medical_history: List[Dict[str, Any]] = Field(default_factory=list)
     allergies: List[str] = Field(default_factory=list)

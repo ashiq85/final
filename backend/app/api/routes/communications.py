@@ -86,6 +86,7 @@ async def get_inbox(
         for doc in docs:
             d = doc.to_dict()
             d["id"] = doc.id
+            d.setdefault("is_urgent", False)  # backward compat for old messages
             messages.append(d)
             
         # Sort by latest first
@@ -132,8 +133,6 @@ async def get_notifications(
         
     docs = db.collection("notifications")\
         .where("user_id", "==", user_id)\
-        .order_by("created_at", direction="DESCENDING")\
-        .limit(50)\
         .stream()
         
     results = []
@@ -141,7 +140,10 @@ async def get_notifications(
         d = doc.to_dict()
         d["id"] = doc.id
         results.append(d)
-    return results
+    
+    # Sort by created_at descending (Python-side, avoids composite index requirement)
+    results.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+    return results[:50]
 
 @router.put("/notifications/{notification_id}/read")
 async def mark_notification_read(
@@ -160,3 +162,63 @@ async def mark_notification_read(
         
     notif_ref.update({"is_read": True})
     return {"status": "success"}
+
+@router.get("/sent/all", response_model=List[MessageResponse])
+async def get_sent_messages(
+    db: Any = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Get messages sent by the current user"""
+    try:
+        messages = []
+        docs = db.collection("messages").where("sender_id", "==", user.id).stream()
+        for doc in docs:
+            d = doc.to_dict()
+            d["id"] = doc.id
+            messages.append(d)
+            
+        messages.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+        return messages
+    except Exception as e:
+        logger.error(f"Error fetching sent messages: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch sent messages")
+
+@router.get("/thread/{other_user_id}", response_model=List[MessageResponse])
+async def get_conversation_thread(
+    other_user_id: str,
+    db: Any = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Get full conversation thread between current user and another user"""
+    try:
+        # Fetch messages where current user is sender and other is recipient
+        sent_docs = db.collection("messages")\
+            .where("sender_id", "==", user.id)\
+            .where("recipient_id", "==", other_user_id)\
+            .stream()
+            
+        # Fetch messages where current user is recipient and other is sender
+        received_docs = db.collection("messages")\
+            .where("sender_id", "==", other_user_id)\
+            .where("recipient_id", "==", user.id)\
+            .stream()
+            
+        messages = []
+        for doc in sent_docs:
+            d = doc.to_dict()
+            d["id"] = doc.id
+            d.setdefault("is_urgent", False)  # backward compat
+            messages.append(d)
+            
+        for doc in received_docs:
+            d = doc.to_dict()
+            d["id"] = doc.id
+            d.setdefault("is_urgent", False)  # backward compat
+            messages.append(d)
+            
+        # Sort by latest first
+        messages.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+        return messages
+    except Exception as e:
+        logger.error(f"Error fetching conversation thread: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch thread")

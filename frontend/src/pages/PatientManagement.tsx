@@ -520,7 +520,8 @@ const PatientManagement: React.FC = () => {
             <CommunicationModal
                 isOpen={isMessageOpen}
                 onClose={() => setIsMessageOpen(false)}
-                patient={selectedPatient}
+                recipientId={selectedPatient?.user?.id ?? selectedPatient?.id ?? null}
+                recipientName={selectedPatient?.user?.full_name ?? null}
             />
         </div>
     );

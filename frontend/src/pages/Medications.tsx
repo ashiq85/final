@@ -2,13 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Pill, Calendar, User, Info, ChevronRight } from 'lucide-react';
 import { patientsAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import clsx from 'clsx';
 
 const Medications: React.FC = () => {
     const { user } = useAuth();
     const [medications, setMedications] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [patientId, setPatientId] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchMeds = async () => {
@@ -17,7 +15,6 @@ const Medications: React.FC = () => {
                 // First get patient profile to get patient ID
                 const profileRes = await patientsAPI.getMyProfile();
                 const pId = profileRes.data.id;
-                setPatientId(pId);
 
                 const medsRes = await patientsAPI.getMedications(pId);
                 setMedications(medsRes.data);

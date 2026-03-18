@@ -12,7 +12,7 @@ const Notifications: React.FC = () => {
     const fetchNotifications = async () => {
         if (!user) return;
         try {
-            const res = await communicationsAPI.getNotifications(user.uid as string);
+            const res = await communicationsAPI.getNotifications(user.id as string);
             setNotifications(res.data);
         } catch (error) {
             console.error('Failed to fetch notifications:', error);

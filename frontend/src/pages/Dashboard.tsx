@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { alertsAPI, appointmentsAPI, adminAPI, patientsAPI, communicationsAPI } from '../services/api';
 import api from '../services/api';
-import type { Alert, Appointment, Patient, Message } from '../types';
+import type { Alert, Appointment, Patient, Message, User } from '../types';
 import clsx from 'clsx';
 import CommunicationModal from '../components/CommunicationModal';
 
@@ -30,15 +30,15 @@ const Dashboard: React.FC = () => {
     const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [messages, setMessages] = useState<Message[]>([]);
     const [patientProfile, setPatientProfile] = useState<any>(null);
-    const [healthMetrics, setHealthMetrics] = useState<any[]>([]);
-    const [isLogModalOpen, setIsLogModalOpen] = useState(false);
-    const [isCommunicationModalOpen, setIsCommunicationModalOpen] = useState(false);
-    const [selectedPatientForMessage, setSelectedPatientForMessage] = useState<Patient | null>(null);
-    const [newMetric, setNewMetric] = useState({ metric_name: 'blood_sugar_before', value: '', unit: 'mg/dL', notes: '' });
     const [diagnosis] = useState<any>(null);
     const [stats, setStats] = useState({ total_doctors: 0, total_patients: 0, active_alerts: 0, pending_visits: 0 });
     const [patientDocuments, setPatientDocuments] = useState<any[]>([]);
     const [upcomingAppointment, setUpcomingAppointment] = useState<Appointment | null>(null);
+    const [doctors, setDoctors] = useState<User[]>([]);
+    const [isDoctorPickerOpen, setIsDoctorPickerOpen] = useState(false);
+    const [selectedDoctorForMessage, setSelectedDoctorForMessage] = useState<any | null>(null);
+    const [isCommunicationModalOpen, setIsCommunicationModalOpen] = useState(false);
+    const [selectedPatientForMessage, setSelectedPatientForMessage] = useState<Patient | null>(null);
 
     const [isAddDoctorOpen, setIsAddDoctorOpen] = useState(false);
     const [isAddPatientOpen, setIsAddPatientOpen] = useState(false);
@@ -80,7 +80,7 @@ const Dashboard: React.FC = () => {
 
             // Fetch unread messages if patient
             if (user.role === 'patient') {
-                const msgRes = await communicationsAPI.getInbox(user.uid as string);
+                const msgRes = await communicationsAPI.getInbox(user.id as string);
                 setMessages(msgRes.data.filter((m: Message) => !m.is_read));
             }
 
@@ -111,14 +111,6 @@ const Dashboard: React.FC = () => {
                 const profileData = profileRes.data;
                 setPatientProfile(profileData);
 
-                // Load metrics
-                try {
-                    const metricsRes = await patientsAPI.getHealthMetrics(profileData.id);
-                    setHealthMetrics(metricsRes.data);
-                } catch (error) {
-                    console.error('Loader: Metrics failed', error);
-                }
-
                 // Load documents
                 try {
                     const docsRes = await api.get(`/documents/patient/${profileData.id}`);
@@ -146,7 +138,7 @@ const Dashboard: React.FC = () => {
         try {
             await adminAPI.createDoctor({ ...doctorForm, role: 'doctor' });
             setFormSuccess(`Dr. ${doctorForm.full_name} has been added successfully!`);
-            setDoctorForm({ full_name: '', email: '', password: '', specialization: '', customSpecialization: '' });
+            setDoctorForm({ full_name: '', email: '', password: '', specialization: '' });
         } catch (err: any) {
             setFormError(err?.response?.data?.detail || 'Failed to create doctor.');
         }
@@ -165,23 +157,6 @@ const Dashboard: React.FC = () => {
             setPatientForm({ full_name: '', email: '', password: '', phone: '', gender: '', date_of_birth: '' });
         } catch (err: any) {
             setFormError(err?.response?.data?.detail || 'Failed to register patient.');
-        }
-    };
-
-    const handleLogMetric = async (e: React.FormEvent) => {
-        e.preventDefault();
-        try {
-            await patientsAPI.logHealthMetric(patientProfile.id, {
-                ...newMetric,
-                value: parseFloat(newMetric.value)
-            });
-            setIsLogModalOpen(false);
-            setNewMetric({ metric_name: 'blood_sugar_before', value: '', unit: 'mg/dL', notes: '' });
-            // Redirect to reports page
-            navigate('/reports');
-        } catch (error: any) {
-            console.error('Error logging metric:', error?.response?.data || error.message);
-            alert("Failed to save health metric. Please try again.");
         }
     };
 
@@ -239,8 +214,8 @@ const Dashboard: React.FC = () => {
 
     const renderDoctorDashboard = () => (
         <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 space-y-6">
+            <div className="grid grid-cols-1 gap-6">
+                <div className="space-y-6">
                     <DashboardCard title="Today's Appointments" icon={Calendar} footer={
                         <Link to="/appointments" className="text-sm font-medium text-primary-600 hover:text-primary-700 flex items-center">
                             View all appointments <ArrowRight className="ml-1 h-4 w-4" />
@@ -303,45 +278,7 @@ const Dashboard: React.FC = () => {
                         </form>
                     </DashboardCard>
                 </div>
-
-                <div className="lg:col-span-1">
-                    <DashboardCard title="Emergency Alerts" icon={AlertCircle} className="bg-red-50 border-red-100">
-                        <div className="space-y-4">
-                            {isLoading.alerts ? (
-                                <div className="flex justify-center flex-col items-center py-8">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500 mb-2"></div>
-                                    <p className="text-xs text-red-400 font-medium">Checking system alerts...</p>
-                                </div>
-                            ) : alerts.length > 0 ? (
-                                alerts.map(alert => (
-                                    <div key={alert.id} className="p-3 bg-white border border-red-200 rounded-lg shadow-sm">
-                                        <div className="flex items-start">
-                                            <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 mr-2" />
-                                            <div>
-                                                <p className="text-sm font-bold text-gray-900">{alert.title}</p>
-                                                <p className="text-xs text-red-600 mb-2">{alert.severity.toUpperCase()} SEVERITY</p>
-                                                <p className="text-xs text-gray-600 mb-3">{alert.description}</p>
-                                                <Link to="/alerts" className="text-xs font-medium text-red-700 bg-red-100 px-2 py-1 rounded hover:bg-red-200">
-                                                    Action Required
-                                                </Link>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))
-                            ) : (
-                                <p className="text-sm text-gray-500 text-center py-4">No active alerts.</p>
-                            )}
-                        </div>
-                    </DashboardCard>
-                </div>
             </div>
-
-            {/* Direct Messaging Modal */}
-            <CommunicationModal
-                isOpen={isCommunicationModalOpen}
-                onClose={() => setIsCommunicationModalOpen(false)}
-                patient={selectedPatientForMessage}
-            />
         </div>
     );
 
@@ -367,56 +304,56 @@ const Dashboard: React.FC = () => {
                                 <Link to="/appointments" className="inline-flex items-center bg-white text-primary-600 px-4 py-2 rounded-lg font-semibold hover:bg-primary-50 transition-colors shadow-sm">
                                     Appointments <ArrowRight className="ml-2 h-4 w-4" />
                                 </Link>
-                                <button
-                                    onClick={() => setIsLogModalOpen(true)}
+                                <Link
+                                    to="/reports"
                                     className="inline-flex items-center bg-primary-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-primary-400 transition-colors border border-primary-400 shadow-sm"
                                 >
-                                    Log Health Data <PlusCircle className="ml-2 h-4 w-4" />
-                                </button>
+                                    Health Reports <FileText className="ml-2 h-4 w-4" />
+                                </Link>
                             </div>
                         </div>
                         <div className="absolute top-0 right-0 -mr-8 -mt-8 h-48 w-48 bg-primary-500/20 rounded-full blur-3xl"></div>
+                        <div className="bg-primary-600 rounded-xl p-6 text-white shadow-lg shadow-primary-200">
+                            <h2 className="text-xl font-bold mb-2">Need to contact your doctor?</h2>
+                            <p className="text-sm text-primary-50 opacity-90 mb-4">Send a direct message to your primary physician for any follow-up questions.</p>
+                            <button 
+                                onClick={async () => {
+                                    try {
+                                        const res = await appointmentsAPI.getDoctors();
+                                        setDoctors(res.data);
+                                        setIsDoctorPickerOpen(true);
+                                    } catch (err) {
+                                        console.error("Failed to fetch doctors", err);
+                                    }
+                                }}
+                                className="bg-white text-primary-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-primary-50 transition-colors flex items-center gap-2"
+                            >
+                                <Send className="h-4 w-4" /> Message Doctor
+                            </button>
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <DashboardCard title="Health Summary" icon={Activity}>
-                            <div className="space-y-4">
-                                {healthMetrics.length > 0 ? (
-                                    <div className="grid grid-cols-2 gap-4">
-                                        {['blood_sugar_before', 'bp_systolic', 'cholesterol'].map(mName => {
-                                            const m = healthMetrics.find(metric => metric.metric_name === mName);
-                                            return m ? (
-                                                <div key={mName} className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-                                                    <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">{mName.replace(/_/g, ' ')}</p>
-                                                    <p className="text-lg font-bold text-gray-900 mt-1">{m.value} <span className="text-xs font-normal text-gray-500">{m.unit}</span></p>
-                                                </div>
-                                            ) : null;
-                                        })}
+                        {diagnosis && (
+                            <DashboardCard title="AI Health Insights" icon={Activity}>
+                                <div className={clsx(
+                                    "p-4 rounded-lg border",
+                                    diagnosis.risk_level === 'HIGH' ? "bg-red-50 border-red-100" :
+                                        diagnosis.risk_level === 'MEDIUM' ? "bg-amber-50 border-amber-100" : "bg-green-50 border-green-100"
+                                )}>
+                                    <div className="flex items-center mb-2">
+                                        <Heart className={clsx(
+                                            "h-5 w-5 mr-2",
+                                            diagnosis.risk_level === 'HIGH' ? "text-red-600" :
+                                                diagnosis.risk_level === 'MEDIUM' ? "text-amber-600" : "text-green-600"
+                                        )} />
+                                        <span className="font-bold text-sm uppercase">AI Health Prediction</span>
                                     </div>
-                                ) : (
-                                    <p className="text-sm text-gray-500 py-2">No health data logged yet.</p>
-                                )}
-
-                                {diagnosis && (
-                                    <div className={clsx(
-                                        "p-4 rounded-lg border",
-                                        diagnosis.risk_level === 'HIGH' ? "bg-red-50 border-red-100" :
-                                            diagnosis.risk_level === 'MEDIUM' ? "bg-amber-50 border-amber-100" : "bg-green-50 border-green-100"
-                                    )}>
-                                        <div className="flex items-center mb-2">
-                                            <Heart className={clsx(
-                                                "h-5 w-5 mr-2",
-                                                diagnosis.risk_level === 'HIGH' ? "text-red-600" :
-                                                    diagnosis.risk_level === 'MEDIUM' ? "text-amber-600" : "text-green-600"
-                                            )} />
-                                            <span className="font-bold text-sm uppercase">AI Health Prediction</span>
-                                        </div>
-                                        <p className="text-xs font-bold text-gray-800">{diagnosis.potential_diagnosis[0]}</p>
-                                        <p className="text-[10px] text-gray-600 mt-1">{diagnosis.recommendations[0]}</p>
-                                    </div>
-                                )}
-                            </div>
-                        </DashboardCard>
+                                    <p className="text-xs font-bold text-gray-800">{diagnosis.potential_diagnosis[0]}</p>
+                                    <p className="text-[10px] text-gray-600 mt-1">{diagnosis.recommendations[0]}</p>
+                                </div>
+                            </DashboardCard>
+                        )}
 
                         {alerts.length > 0 && (
                             <DashboardCard title="Active Medical Alerts" icon={AlertCircle} className="bg-red-50 border-red-100">
@@ -584,6 +521,55 @@ const Dashboard: React.FC = () => {
             {user.role === 'doctor' && renderDoctorDashboard()}
             {user.role === 'patient' && renderPatientDashboard()}
 
+            {/* Direct Messaging Modal */}
+            <CommunicationModal
+                isOpen={isCommunicationModalOpen}
+                onClose={() => {
+                    setIsCommunicationModalOpen(false);
+                    if (user.role === 'doctor') setSelectedPatientForMessage(null);
+                    if (user.role === 'patient') setSelectedDoctorForMessage(null);
+                }}
+                recipientId={user.role === 'doctor' ? (selectedPatientForMessage?.user_id ?? null) : (selectedDoctorForMessage?.id ?? null)}
+                recipientName={user.role === 'doctor' ? (selectedPatientForMessage?.user?.full_name ?? null) : (selectedDoctorForMessage?.full_name ?? "Doctor")}
+            />
+
+            {/* Doctor Picker Modal for Patients */}
+            {isDoctorPickerOpen && (
+                <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900">Message a Doctor</h3>
+                            <button onClick={() => setIsDoctorPickerOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="h-6 w-6" /></button>
+                        </div>
+                        <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                            {doctors.length > 0 ? (
+                                doctors.map(doc => (
+                                    <button
+                                        key={doc.id}
+                                        onClick={() => {
+                                            setSelectedDoctorForMessage(doc);
+                                            setIsDoctorPickerOpen(false);
+                                            setIsCommunicationModalOpen(true);
+                                        }}
+                                        className="w-full flex items-center p-4 bg-gray-50 hover:bg-primary-50 rounded-xl border border-gray-100 hover:border-primary-200 transition-all text-left"
+                                    >
+                                        <div className="h-10 w-10 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 font-bold mr-4">
+                                            {doc.full_name?.charAt(0)}
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-gray-900">{doc.full_name}</p>
+                                            <p className="text-sm text-primary-600">{doc.specialization}</p>
+                                        </div>
+                                    </button>
+                                ))
+                            ) : (
+                                <p className="text-center text-gray-500 py-4">No doctors available.</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Add Doctor Modal */}
             {isAddDoctorOpen && (
                 <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
@@ -681,101 +667,6 @@ const Dashboard: React.FC = () => {
                 </div>
             )}
 
-            {/* Log Health Data Modal */}
-            {isLogModalOpen && (
-                <div className="fixed inset-0 z-50 overflow-y-auto">
-                    <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-                        <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-                            <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
-                        </div>
-                        <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-                        <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-                            <form onSubmit={handleLogMetric}>
-                                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                                    <div className="sm:flex sm:items-start">
-                                        <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
-                                            <h3 className="text-lg leading-6 font-bold text-gray-900 mb-4">Log Health Metric</h3>
-                                            <div className="space-y-4">
-                                                <div>
-                                                    <label className="block text-sm font-medium text-gray-700">Metric Type</label>
-                                                    <select
-                                                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                                                        value={newMetric.metric_name}
-                                                        onChange={e => setNewMetric({ ...newMetric, metric_name: e.target.value })}
-                                                    >
-                                                        <option value="blood_sugar_before">Blood Sugar (Before Meals)</option>
-                                                        <option value="blood_sugar_after">Blood Sugar (After Meals)</option>
-                                                        <option value="bp_systolic">Blood Pressure (Systolic)</option>
-                                                        <option value="bp_diastolic">Blood Pressure (Diastolic)</option>
-                                                        <option value="cholesterol">Cholesterol</option>
-                                                        <option value="custom">Other (Custom Parameter)</option>
-                                                    </select>
-                                                </div>
-                                                {newMetric.metric_name === 'custom' && (
-                                                    <div>
-                                                        <label className="block text-sm font-medium text-gray-700">Custom Metric Name</label>
-                                                        <input
-                                                            type="text"
-                                                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                                                            placeholder="e.g., Uric Acid"
-                                                            required
-                                                            onChange={e => setNewMetric({ ...newMetric, metric_name: e.target.value })}
-                                                        />
-                                                    </div>
-                                                )}
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label className="block text-sm font-medium text-gray-700">Value</label>
-                                                        <input
-                                                            type="number"
-                                                            step="0.1"
-                                                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                                                            value={newMetric.value}
-                                                            required
-                                                            onChange={e => setNewMetric({ ...newMetric, value: e.target.value })}
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-sm font-medium text-gray-700">Unit</label>
-                                                        <input
-                                                            type="text"
-                                                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                                                            value={newMetric.unit}
-                                                            placeholder="e.g., mg/dL"
-                                                            onChange={e => setNewMetric({ ...newMetric, unit: e.target.value })}
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <label className="block text-sm font-medium text-gray-700">Notes (Optional)</label>
-                                                    <textarea
-                                                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                                                        rows={2}
-                                                        value={newMetric.notes}
-                                                        onChange={e => setNewMetric({ ...newMetric, notes: e.target.value })}
-                                                    ></textarea>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                                    <button type="submit" className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-primary-600 text-base font-medium text-white hover:bg-primary-700 sm:ml-3 sm:w-auto sm:text-sm">
-                                        Save Metric
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsLogModalOpen(false)}
-                                        className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-                                    >
-                                        Cancel
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

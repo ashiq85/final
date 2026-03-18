@@ -3,7 +3,7 @@ from typing import List, Optional, Any, Dict
 from datetime import datetime
 from app.db.base import get_db
 from app.db.models import Patient, User, UserRole, HealthMetric, HealthReport, IPRecord
-from app.schemas import PatientCreate, PatientUpdate, PatientResponse, UserCreate, HealthMetricCreate, HealthMetricResponse, PatientMedication, IPRecordCreate, IPRecordResponse
+from app.schemas import PatientCreate, PatientUpdate, PatientResponse, UserCreate, HealthMetricCreate, HealthMetricResponse, PatientMedication, IPRecordCreate, IPRecordResponse, IPRecordUpdate
 from app.core.llm import get_llm
 from app.api.routes.auth import get_current_user
 from app.core.security import get_password_hash
@@ -188,6 +188,47 @@ async def search_patient_records(
     return formatted_results
 
 
+@router.put("/me", response_model=PatientResponse)
+async def update_my_patient_profile(
+    patient_data: PatientUpdate,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update the current patient's own profile"""
+    if current_user.role != UserRole.PATIENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only patients can access this endpoint"
+        )
+
+    docs = db.collection("patients").where("user_id", "==", current_user.id).limit(1).stream()
+    patient_doc = None
+    for doc in docs:
+        patient_doc = doc
+        break
+
+    if not patient_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Patient profile not found"
+        )
+
+    update_data = patient_data.model_dump(exclude_unset=True)
+    if update_data:
+        db.collection("patients").document(patient_doc.id).update(update_data)
+
+    final_doc = db.collection("patients").document(patient_doc.id).get()
+    data = final_doc.to_dict()
+    data['id'] = final_doc.id
+    
+    # Ensure lists are lists, not None (safeguard against legacy data)
+    for list_field in ['medical_history', 'allergies', 'current_medications']:
+        if data.get(list_field) is None:
+            data[list_field] = []
+            
+    return PatientResponse(**data)
+
+
 @router.get("/me", response_model=PatientResponse)
 async def get_my_patient_profile(
     db: Any = Depends(get_db),
@@ -214,6 +255,12 @@ async def get_my_patient_profile(
     
     data = patient_doc.to_dict()
     data['id'] = patient_doc.id
+    
+    # Ensure lists are lists, not None
+    for list_field in ['medical_history', 'allergies', 'current_medications']:
+        if data.get(list_field) is None:
+            data[list_field] = []
+            
     return PatientResponse(**data)
 
 
@@ -666,4 +713,39 @@ def add_patient_ip_record(
     
     data = ip_record.model_dump()
     data["id"] = doc_ref.id
+    return data
+
+@router.put("/{id}/ip-records/{record_id}", response_model=IPRecordResponse)
+def update_patient_ip_record(
+    id: str,
+    record_id: str,
+    ip_update: IPRecordUpdate,
+    db: Any = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update an inpatient admission record (e.g. discharge)"""
+    if current_user.role not in [UserRole.DOCTOR, UserRole.ADMIN]:
+        raise HTTPException(status_code=403, detail="Not authorized to update IP records")
+        
+    ip_ref = db.collection("ip_records").document(record_id)
+    ip_doc = ip_ref.get()
+    
+    if not ip_doc.exists:
+        raise HTTPException(status_code=404, detail="IP record not found")
+        
+    if ip_doc.to_dict().get("patient_id") != id:
+        raise HTTPException(status_code=400, detail="Record does not belong to this patient")
+        
+    update_data = ip_update.model_dump(exclude_unset=True)
+    if update_data:
+        # Convert datetime if present
+        if "discharge_date" in update_data and update_data["discharge_date"]:
+             # If it's already a datetime object from pydantic, Firestore handles it
+             pass
+        
+        ip_ref.update(update_data)
+        
+    updated_doc = ip_ref.get()
+    data = updated_doc.to_dict()
+    data["id"] = updated_doc.id
     return data

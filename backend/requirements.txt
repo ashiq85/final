@@ -10,6 +10,7 @@ crewai
 langchain
 langchain-text-splitters
 langchain-google-genai
+langchain-ollama
 chromadb
 requests
 httpx

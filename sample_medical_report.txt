@@ -1,4 +1,4 @@
-Patient: John Doe
+Patient: ashiq
 Date: March 13, 2026
 Clinical Note:
 The patient presents with persistent sharp sub-sternal chest pain that radiates to the left arm, lasting approximately 15 minutes per episode. This is often triggered by physical exertion and relieved by rest or sublingual nitroglycerin. 

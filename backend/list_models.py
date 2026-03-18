@@ -1,13 +1,20 @@
-"""List available Gemini models for the current API key"""
-import sys, os
-sys.path.insert(0, os.getcwd())
-
-from app.core.config import settings
+import os
 import google.generativeai as genai
+from dotenv import load_dotenv
 
-genai.configure(api_key=settings.GOOGLE_API_KEY)
+load_dotenv()
 
-print("Available models that support generateContent:")
-for m in genai.list_models():
-    if 'generateContent' in m.supported_generation_methods:
-        print(f"  - {m.name}")
+api_key = os.getenv("GOOGLE_API_KEY")
+if not api_key:
+    print("Error: GOOGLE_API_KEY not found in .env")
+    exit(1)
+
+genai.configure(api_key=api_key)
+
+print("Listing supported models...")
+try:
+    for m in genai.list_models():
+        if 'generateContent' in m.supported_generation_methods:
+            print(f"Model: {m.name}, Display Name: {m.display_name}")
+except Exception as e:
+    print(f"Error listing models: {e}")

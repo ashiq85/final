@@ -51,6 +51,7 @@ export const patientsAPI = {
     update: (id: string, data: any) => api.put(`/patients/${id}`, data),
     search: (query: string) => api.get('/patients/search', { params: { query } }),
     getMyProfile: () => api.get('/patients/me'),
+    updateMyProfile: (data: any) => api.put('/patients/me', data),
     registerByDoctor: (userData: any, patientData: any) =>
         api.post('/patients/register', { user_data: userData, patient_data: patientData }),
     getHealthMetrics: (patientId: string) => api.get<any[]>(`/patients/${patientId}/health-metrics`),

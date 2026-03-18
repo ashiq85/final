@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from app.db.models import UserRole, AppointmentStatus, AlertSeverity
@@ -49,15 +49,20 @@ class PatientBase(BaseModel):
     blood_type: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
-    emergency_contact: Optional[str] = None
+    emergency_contact: Optional[Dict[str, Any]] = None
     emergency_phone: Optional[str] = None
     primary_doctor_id: Optional[str] = None
     email: Optional[EmailStr] = None
-    medical_history: List[Dict[str, Any]] = Field(default_factory=list)
-    allergies: List[str] = Field(default_factory=list)
-    current_medications: List[str] = Field(default_factory=list)
+    medical_history: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    allergies: Optional[List[str]] = Field(default_factory=list)
+    current_medications: Optional[List[str]] = Field(default_factory=list)
     height: Optional[float] = None
     weight: Optional[float] = None
+
+    @field_validator('medical_history', 'allergies', 'current_medications', mode='before')
+    @classmethod
+    def none_to_empty_list(cls, v):
+        return v if v is not None else []
 
 
 class PatientCreate(PatientBase):
@@ -70,7 +75,7 @@ class PatientUpdate(BaseModel):
     blood_type: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
-    emergency_contact: Optional[str] = None
+    emergency_contact: Optional[Dict[str, Any]] = None
     emergency_phone: Optional[str] = None
     medical_history: Optional[List[Dict[str, Any]]] = None
     allergies: Optional[List[str]] = None
@@ -350,6 +355,14 @@ class IPRecordCreate(BaseModel):
     notes: Optional[str] = None
     status: str = "admitted"
 
+class IPRecordUpdate(BaseModel):
+    discharge_date: Optional[datetime] = None
+    ward: Optional[str] = None
+    bed_number: Optional[str] = None
+    attending_doctor: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = None
+
 class IPRecordResponse(IPRecordCreate):
     id: str
     patient_id: str
@@ -371,5 +384,6 @@ class MessageResponse(MessageCreate):
     sender_id: str
     sender_name: str
     sender_role: str
-    is_read: bool
+    is_urgent: bool = False   # Override to default False for backward compat with old messages
+    is_read: bool = False
     created_at: datetime
