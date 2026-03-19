@@ -32,6 +32,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 { name: 'Patient Records', href: '/doctor/patients', icon: Users },
                 { name: 'Add New Patient', href: '/patients', icon: Users },
                 { name: 'Appointments', href: '/appointments', icon: Calendar },
+                { name: 'Inbox', href: '/inbox', icon: Inbox },
             ];
         } else {
             // Patient
@@ -40,7 +41,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 { name: 'Appointments', href: '/appointments', icon: Calendar },
                 { name: 'Clinical Support', href: '/clinical-support', icon: Activity },
                 { name: 'Medications', href: '/medications', icon: Pill },
-                { name: 'Notifications', href: '/notifications', icon: Inbox },
+                { name: 'Inbox', href: '/inbox', icon: Inbox },
                 { name: 'Alerts', href: '/alerts', icon: Bell },
                 { name: 'Health Reports', href: '/reports', icon: Heart },
                 { name: 'Feedback', href: '/feedback', icon: MessageSquare },

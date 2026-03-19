@@ -467,8 +467,8 @@ const DoctorPatientView: React.FC = () => {
                                     { label: 'Blood Type', value: patient.blood_type || '—', badge: 'red' },
                                     { label: 'Email', value: patient.email || patient.user?.email || '—' },
                                     { label: 'Phone', value: patient.phone || '—' },
-                                    { label: 'Emergency Contact', value: patient.emergency_contact || '—' },
-                                    { label: 'Emergency Phone', value: patient.emergency_phone || '—' },
+                                    { label: 'Emergency Contact', value: (patient.emergency_contact?.name ? `${patient.emergency_contact.name} (${patient.emergency_contact.relationship || 'Unspecified'})` : '—') },
+                                    { label: 'Emergency Phone', value: patient.emergency_contact?.phone || '—' },
                                 ].map(({ label, value, mono, badge }) => (
                                     <div key={label} className="bg-gray-50 rounded-lg p-3">
                                         <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-1">{label}</p>

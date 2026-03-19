@@ -17,7 +17,7 @@ import DoctorPatientView from './pages/DoctorPatientView';
 import PatientEncounter from './pages/PatientEncounter';
 import Profile from './pages/Profile';
 import Medications from './pages/Medications';
-import Notifications from './pages/Notifications';
+import InboxPage from './pages/Inbox';
 import Feedback from './pages/Feedback';
 
 const queryClient = new QueryClient();
@@ -111,11 +111,11 @@ const AppRoutes: React.FC = () => {
         }
       />
       <Route
-        path="/notifications"
+        path="/inbox"
         element={
           <ProtectedRoute>
             <Layout>
-              <Notifications />
+              <InboxPage />
             </Layout>
           </ProtectedRoute>
         }

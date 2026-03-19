@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Pill, Calendar, User, Info, ChevronRight } from 'lucide-react';
+import { Pill, Calendar, User, Info, ChevronRight, X } from 'lucide-react';
 import { patientsAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -7,6 +7,7 @@ const Medications: React.FC = () => {
     const { user } = useAuth();
     const [medications, setMedications] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [selectedMed, setSelectedMed] = useState<any>(null);
 
     useEffect(() => {
         const fetchMeds = async () => {
@@ -67,14 +68,18 @@ const Medications: React.FC = () => {
                                     <span>{new Date(med.prescribed_date).toLocaleDateString()}</span>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4 mb-4">
+                                <div className="grid grid-cols-3 gap-4 mb-4">
                                     <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
                                         <p className="text-[10px] text-gray-400 uppercase font-black tracking-widest">Dosage</p>
                                         <p className="text-sm font-bold text-gray-700">{med.dosage}</p>
                                     </div>
                                     <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
-                                        <p className="text-[10px] text-gray-400 uppercase font-black tracking-widest">Frequency</p>
+                                        <p className="text-[10px] text-gray-400 uppercase font-black tracking-widest">Freq</p>
                                         <p className="text-sm font-bold text-gray-700">{med.frequency}</p>
+                                    </div>
+                                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                        <p className="text-[10px] text-gray-400 uppercase font-black tracking-widest">Days</p>
+                                        <p className="text-sm font-bold text-gray-700">{med.duration_days ? `${med.duration_days}` : '—'}</p>
                                     </div>
                                 </div>
 
@@ -90,7 +95,7 @@ const Medications: React.FC = () => {
                             </div>
                             <div className="bg-gray-50 px-6 py-3 flex justify-between items-center border-t border-gray-100">
                                 <span className="text-xs text-gray-400 italic">Reported in Clinical Encounter</span>
-                                <button className="text-primary-600 text-xs font-bold flex items-center hover:underline">
+                                <button onClick={() => setSelectedMed(med)} className="text-primary-600 text-xs font-bold flex items-center hover:underline">
                                     Details <ChevronRight className="h-3 w-3 ml-1" />
                                 </button>
                             </div>
@@ -104,6 +109,73 @@ const Medications: React.FC = () => {
                     </div>
                     <h3 className="text-xl font-bold text-gray-900 mb-2">No Medications Found</h3>
                     <p className="text-gray-500 max-w-sm mx-auto">You don't have any prescribed medications in your records yet. New prescriptions will appear here after your clinical encounters.</p>
+                </div>
+            )}
+
+            {selectedMed && (
+                <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex justify-center items-center p-4 z-50">
+                    <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl flex flex-col space-y-4">
+                        <div className="flex justify-between items-start">
+                            <div className="flex items-center space-x-3">
+                                <div className="h-10 w-10 bg-primary-100 rounded-xl flex items-center justify-center text-primary-600 flex-shrink-0">
+                                    <Pill className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-gray-900">{selectedMed.medication_name}</h3>
+                                    <p className="text-xs font-bold text-primary-600 uppercase">Prescription Info</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setSelectedMed(null)} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+                        </div>
+                        
+                        <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-3 text-sm">
+                            <div className="grid grid-cols-2 gap-2 border-b border-gray-200 pb-3">
+                                <div>
+                                    <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Prescribed By</p>
+                                    <p className="font-semibold text-gray-900">Dr. {selectedMed.prescribed_by}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Date</p>
+                                    <p className="font-semibold text-gray-900">{new Date(selectedMed.prescribed_date).toLocaleDateString()}</p>
+                                </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-3 gap-2 border-b border-gray-200 pb-3">
+                                <div>
+                                    <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Dosage</p>
+                                    <p className="font-semibold text-gray-900">{selectedMed.dosage}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Frequency</p>
+                                    <p className="font-semibold text-gray-900">{selectedMed.frequency}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Duration</p>
+                                    <p className="font-semibold text-gray-900">{selectedMed.duration_days ? `${selectedMed.duration_days} days` : 'Ongoing'}</p>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <p className="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Status</p>
+                                <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${selectedMed.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'}`}>
+                                    {selectedMed.status || 'Active'}
+                                </span>
+                            </div>
+                        </div>
+
+                        {selectedMed.instructions && (
+                            <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100/50">
+                                <p className="text-xs text-blue-800 font-bold uppercase tracking-wider mb-1 flex items-center">
+                                    <Info className="h-3 w-3 mr-1" /> Instructions
+                                </p>
+                                <p className="text-sm text-blue-900">{selectedMed.instructions}</p>
+                            </div>
+                        )}
+                        
+                        <div className="pt-2 flex justify-end">
+                            <button onClick={() => setSelectedMed(null)} className="btn-primary w-full shadow-md">Close Details</button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

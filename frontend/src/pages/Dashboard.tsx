@@ -28,7 +28,6 @@ const Dashboard: React.FC = () => {
     const navigate = useNavigate();
     const [alerts, setAlerts] = useState<Alert[]>([]);
     const [appointments, setAppointments] = useState<Appointment[]>([]);
-    const [messages, setMessages] = useState<Message[]>([]);
     const [patientProfile, setPatientProfile] = useState<any>(null);
     const [diagnosis] = useState<any>(null);
     const [stats, setStats] = useState({ total_doctors: 0, total_patients: 0, active_alerts: 0, pending_visits: 0 });
@@ -77,12 +76,6 @@ const Dashboard: React.FC = () => {
                 .sort((a, b) => new Date(a.appointment_date).getTime() - new Date(b.appointment_date).getTime());
 
             setUpcomingAppointment(relevant.length > 0 ? relevant[0] : null);
-
-            // Fetch unread messages if patient
-            if (user.role === 'patient') {
-                const msgRes = await communicationsAPI.getInbox(user.id as string);
-                setMessages(msgRes.data.filter((m: Message) => !m.is_read));
-            }
 
         } catch (error) {
             console.error('Loader: Appointments failed', error);
@@ -157,15 +150,6 @@ const Dashboard: React.FC = () => {
             setPatientForm({ full_name: '', email: '', password: '', phone: '', gender: '', date_of_birth: '' });
         } catch (err: any) {
             setFormError(err?.response?.data?.detail || 'Failed to register patient.');
-        }
-    };
-
-    const handleMarkMessageRead = async (messageId: string) => {
-        try {
-            await communicationsAPI.markAsRead(messageId);
-            setMessages(prev => prev.filter(m => m.id !== messageId));
-        } catch (error) {
-            console.error('Error marking message read:', error);
         }
     };
 
@@ -391,43 +375,6 @@ const Dashboard: React.FC = () => {
                             </div>
                         </DashboardCard>
                     </div>
-
-                    {/* Patient Inbox / Clinical Instructions */}
-                    <DashboardCard title="Inbox & Clinical Instructions" icon={Inbox}>
-                        <div className="space-y-4">
-                            {messages.length > 0 ? (
-                                messages.map(msg => (
-                                    <div key={msg.id} className={clsx(
-                                        "p-4 rounded-lg border shadow-sm",
-                                        msg.is_urgent ? "bg-red-50 border-red-200" : "bg-blue-50 border-blue-100"
-                                    )}>
-                                        <div className="flex justify-between items-start mb-2">
-                                            <div className="flex items-center space-x-2">
-                                                {msg.is_urgent && <AlertCircle className="h-4 w-4 text-red-600" />}
-                                                <h4 className="text-sm font-bold text-gray-900">{msg.subject}</h4>
-                                            </div>
-                                            <span className="text-xs text-gray-500">{new Date(msg.created_at).toLocaleDateString()}</span>
-                                        </div>
-                                        <p className="text-sm text-gray-700 mb-3 whitespace-pre-wrap">{msg.body}</p>
-                                        <div className="flex items-center justify-between text-xs">
-                                            <span className="font-medium text-gray-600">From: {msg.sender_name}</span>
-                                            <button
-                                                onClick={() => handleMarkMessageRead(msg.id)}
-                                                className="flex items-center text-primary-600 hover:text-primary-800 font-medium bg-white px-2 py-1 rounded shadow-sm border border-primary-100"
-                                            >
-                                                <CheckCircle2 className="h-3 w-3 mr-1" /> Mark as Read
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))
-                            ) : (
-                                <div className="text-center py-6">
-                                    <Inbox className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-                                    <p className="text-sm text-gray-500">Your inbox is empty.</p>
-                                </div>
-                            )}
-                        </div>
-                    </DashboardCard>
                 </div>
 
                 <div className="lg:col-span-1 space-y-6">

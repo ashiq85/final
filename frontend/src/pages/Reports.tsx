@@ -75,8 +75,21 @@ const Reports: React.FC = () => {
             }));
             const grouped = chartPoints.reduce((acc: any, curr: any) => {
                 if (!acc[curr.date]) acc[curr.date] = { date: curr.date };
-                if (curr.name.includes('heart')) acc[curr.date].heartRate = curr.value;
-                if (curr.name.includes('blood_sugar') || curr.name.includes('sugar')) acc[curr.date].sugar = curr.value;
+                
+                const lowerName = curr.name.toLowerCase();
+                
+                if (lowerName.includes('heart')) {
+                    acc[curr.date].heartRate = curr.value;
+                } else if (lowerName.includes('sugar')) {
+                    acc[curr.date].sugar = curr.value;
+                } else if (lowerName.includes('bp') || lowerName.includes('pressure')) {
+                    acc[curr.date].bp = curr.value;
+                } else if (lowerName.includes('weight')) {
+                    acc[curr.date].weight = curr.value;
+                } else if (lowerName.includes('temp')) {
+                    acc[curr.date].temp = curr.value;
+                }
+                
                 return acc;
             }, {});
             setTrendData(Object.values(grouped));
@@ -193,15 +206,15 @@ const Reports: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="card border-0 bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg overflow-hidden relative">
                     <div className="relative z-10">
-                        <p className="text-xs font-bold uppercase tracking-widest text-blue-100">Latest Heart Rate</p>
+                        <p className="text-xs font-bold uppercase tracking-widest text-blue-100">Latest Blood Pressure</p>
                         <div className="flex items-baseline mt-2">
-                            <p className="text-4xl font-black">{metrics.find(m => m.metric_name.includes('heart'))?.value || '--'}</p>
-                            <span className="ml-2 text-sm font-medium text-blue-100">BPM</span>
+                            <p className="text-4xl font-black">{metrics.find(m => (m.metric_name || '').toLowerCase().includes('bp') || (m.metric_name || '').toLowerCase().includes('pressure'))?.value || '--'}</p>
+                            <span className="ml-2 text-sm font-medium text-blue-100">mmHg</span>
                         </div>
                         <div className="mt-4 flex items-center text-xs text-blue-100 font-bold">
                             <TrendingUp className="h-3 w-3 mr-1" />
-                            {metrics.find(m => m.metric_name.includes('heart'))
-                                ? `Updated ${format(new Date(metrics.find(m => m.metric_name.includes('heart')).recorded_at), 'MMM d')}`
+                            {metrics.find(m => (m.metric_name || '').toLowerCase().includes('bp') || (m.metric_name || '').toLowerCase().includes('pressure'))
+                                ? `Updated ${format(new Date(metrics.find(m => (m.metric_name || '').toLowerCase().includes('bp') || (m.metric_name || '').toLowerCase().includes('pressure'))?.recorded_at || Date.now()), 'MMM d')}`
                                 : 'Not logged yet'}
                         </div>
                     </div>
@@ -212,11 +225,14 @@ const Reports: React.FC = () => {
                     <div className="relative z-10">
                         <p className="text-xs font-bold uppercase tracking-widest text-green-100">Latest Blood Sugar</p>
                         <div className="flex items-baseline mt-2">
-                            <p className="text-4xl font-black">{metrics.find(m => m.metric_name.includes('sugar') || m.metric_name.includes('blood_sugar'))?.value || '--'}</p>
+                            <p className="text-4xl font-black">{metrics.find(m => (m.metric_name || '').toLowerCase().includes('sugar') || (m.metric_name || '').toLowerCase().includes('blood_sugar'))?.value || '--'}</p>
                             <span className="ml-2 text-sm font-medium text-green-100">mg/dL</span>
                         </div>
                         <div className="mt-4 flex items-center text-xs text-green-100 font-bold">
-                            <CheckCircle className="h-3 w-3 mr-1" /> {metrics.find(m => m.metric_name.includes('sugar'))?.unit || 'Verified'}
+                            <TrendingUp className="h-3 w-3 mr-1" />
+                            {metrics.find(m => (m.metric_name || '').toLowerCase().includes('sugar') || (m.metric_name || '').toLowerCase().includes('blood_sugar'))
+                                ? `Updated ${format(new Date(metrics.find(m => (m.metric_name || '').toLowerCase().includes('sugar') || (m.metric_name || '').toLowerCase().includes('blood_sugar'))?.recorded_at || Date.now()), 'MMM d')}`
+                                : 'Not logged yet'}
                         </div>
                     </div>
                     <Activity className="absolute -right-4 -bottom-4 h-32 w-32 text-white/10" />
@@ -454,6 +470,7 @@ const Reports: React.FC = () => {
                                     <Tooltip contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
                                     <Area type="monotone" dataKey="heartRate" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorHr)" name="Heart Rate (BPM)" />
                                     <Area type="monotone" dataKey="sugar" stroke="#10b981" strokeWidth={3} fillOpacity={0.1} fill="#10b981" name="Blood Sugar (mg/dL)" />
+                                    <Area type="monotone" dataKey="bp" stroke="#ef4444" strokeWidth={3} fillOpacity={0.1} fill="#ef4444" name="Blood Pressure (mmHg)" />
                                 </AreaChart>
                             </ResponsiveContainer>
                         ) : (
